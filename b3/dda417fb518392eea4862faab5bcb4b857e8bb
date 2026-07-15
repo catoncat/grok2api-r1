@@ -1,0 +1,39 @@
+backend/internal/infra/provider/web/chat.go
+  s_ad33ef1498ecf2::t_b49ae5180d08c9 166-169,172
+backend/internal/application/media/service.go
+  s_ad33ef1498ecf2::t_384dba036bd16b 35,48-52,135-138,140-147,151-155
+  s_ad33ef1498ecf2::t_4aa3a8da8964be 156
+backend/internal/app/application.go
+  s_ad33ef1498ecf2::t_43d2faac6a81ac 108-131,174-177
+backend/internal/infra/provider/web/adapter.go
+  s_ad33ef1498ecf2::t_302144bf2b6fb3 6,31-39,44
+backend/internal/infra/egress/manager.go
+  s_ad33ef1498ecf2::t_9f331fa4b886d5 9,289-290,297,309,321,324,330-343
+  s_ad33ef1498ecf2::t_f2b6b587179581 344
+backend/internal/infra/config/config.go
+  s_ad33ef1498ecf2::t_c51198c0c1fa00 168,175-184,361-367,369-375,519
+backend/internal/infra/provider/web/image.go
+  s_ad33ef1498ecf2::t_0507465406b909 28-31,360-361,364,367-370,374,387-389,392-396,1009-1011,1015,1021,1023-1026,1127-1162,1168-1196,1207
+backend/go.mod
+  s_ad33ef1498ecf2::t_aee9c531ded881 6-9,35-48
+backend/go.sum
+  s_ad33ef1498ecf2::t_f96d2e5ffd6bf4 9-44
+backend/internal/infra/media/s3_store.go
+  s_ad33ef1498ecf2::t_4e15f27a6d7038 1-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b3dda417fb518392eea4862faab5bcb4b857e8bb",
+  "prompts": {},
+  "sessions": {
+    "s_ad33ef1498ecf2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f6321-0325-7ebf-985c-324d765d99f4",
+        "model": "grok-4.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
