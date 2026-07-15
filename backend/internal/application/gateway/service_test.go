@@ -186,11 +186,62 @@ func TestSelectMediaRouteSkipsSameNamedConversationRoute(t *testing.T) {
 		{ID: 20, PublicID: "Web/grok-shared", Provider: account.ProviderWeb, UpstreamModel: "grok-shared", Capability: modeldomain.CapabilityImage},
 	}
 	selected, err := service.selectMediaRoute(routes, clientkey.Key{}, modeldomain.CapabilityImage, func(providerValue account.Provider) bool {
-		_, ok := registry.Images(providerValue)
+		_, ok := registry.ImageGeneration(providerValue)
 		return ok
 	})
 	if err != nil || selected.ID != 20 {
 		t.Fatalf("selected route = %#v, err = %v", selected, err)
+	}
+}
+
+func TestGenerateImageReturnsWhenEveryCredentialRefreshFails(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "image-credential-failure.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	responseRepo := relational.NewResponseRepository(database)
+	now := time.Now().UTC()
+	credential, _, err := accountRepo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderBuild, AuthType: account.AuthTypeOAuth,
+		Name: "expired-image", SourceKey: "expired-image", EncryptedAccessToken: "expired", EncryptedRefreshToken: "refresh",
+		ExpiresAt: now.Add(-time.Minute), Enabled: true, AuthStatus: account.AuthStatusActive, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.UpsertRoutes(ctx, []modeldomain.Route{{
+		PublicID: "image-credential-failure", Provider: account.ProviderBuild, UpstreamModel: "image-credential-failure",
+		Capability: modeldomain.CapabilityImage, Enabled: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"image-credential-failure"}, now); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &credentialFailureImageAdapter{}
+	registry := provider.NewRegistry(adapter)
+	sticky := memory.NewStickyStore()
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
+	selector := NewSelector(accountRepo, memory.NewConcurrencyLimiter(), sticky, registry, time.Hour, time.Second, time.Minute)
+	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 1)
+
+	_, err = service.GenerateImage(ctx, ImageGenerationInput{
+		RequestID: "req-image-credential-failure", ClientKey: clientkey.Key{ID: 1, Name: "image-key"},
+		PublicModel: "image-credential-failure", Prompt: "test", Count: 1, ResponseFormat: "url",
+	})
+	if !errors.Is(err, ErrNoAvailableAccount) {
+		t.Fatalf("error = %v", err)
+	}
+	if adapter.generationCalls.Load() != 0 {
+		t.Fatalf("generation calls = %d", adapter.generationCalls.Load())
 	}
 }
 
@@ -425,6 +476,23 @@ func TestGatewayRefreshesAndRetriesBuildPermissionDenialOnce(t *testing.T) {
 	}
 	if updated.EncryptedAccessToken != "access-new" || updated.AuthStatus != account.AuthStatusActive || updated.RefreshFailureCount != 0 {
 		t.Fatalf("updated credential = %#v", updated)
+	}
+	if err := accountRepo.UpdateCredentialRefreshFailure(ctx, credential.ID, 1, updated.ExpiresAt, "invalid_grant", true); err != nil {
+		t.Fatal(err)
+	}
+	adapter.rejectAll.Store(true)
+	if _, err := service.CreateResponse(ctx, Input{
+		RequestID: "req-rejected", ClientKey: clientKey, PublicModel: "grok-rescue",
+		Body: []byte(`{"model":"grok-rescue","input":"hello again"}`),
+	}); err == nil {
+		t.Fatal("rejected access token unexpectedly succeeded")
+	}
+	rejected, err := accountRepo.Get(ctx, credential.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.AuthStatus != account.AuthStatusReauthRequired || adapter.refreshes.Load() != 1 {
+		t.Fatalf("rejected credential = %#v, refreshes = %d", rejected, adapter.refreshes.Load())
 	}
 }
 
@@ -849,6 +917,7 @@ type systemicForbiddenAdapter struct {
 type authRescueAdapter struct {
 	attempts  atomic.Int64
 	refreshes atomic.Int64
+	rejectAll atomic.Bool
 }
 
 func (a *authRescueAdapter) Provider() account.Provider { return account.ProviderBuild }
@@ -857,6 +926,12 @@ func (a *authRescueAdapter) Definition() provider.Definition {
 }
 func (a *authRescueAdapter) ForwardResponse(_ context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {
 	a.attempts.Add(1)
+	if a.rejectAll.Load() {
+		return &provider.Response{
+			StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized", Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unauthorized","message":"access token rejected"}}`)),
+		}, nil
+	}
 	if request.Credential.EncryptedAccessToken == "access-old" {
 		return &provider.Response{
 			StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header),
@@ -902,6 +977,29 @@ type webImageStreamAdapter struct {
 
 type webChatQuotaAdapter struct {
 	synced chan string
+}
+
+type credentialFailureImageAdapter struct {
+	generationCalls atomic.Int64
+}
+
+func (a *credentialFailureImageAdapter) Provider() account.Provider { return account.ProviderBuild }
+
+func (a *credentialFailureImageAdapter) Definition() provider.Definition {
+	return provider.Definition{
+		Provider: account.ProviderBuild, ModelNamespace: account.ProviderBuild.ModelNamespace(),
+		Credential: provider.CredentialSurface{AuthType: account.AuthTypeOAuth, Refresh: true},
+		Media:      provider.MediaSurface{ImageGeneration: true},
+	}
+}
+
+func (a *credentialFailureImageAdapter) RefreshCredential(context.Context, account.Credential) (provider.RefreshedCredential, error) {
+	return provider.RefreshedCredential{}, errors.New("simulated credential refresh failure")
+}
+
+func (a *credentialFailureImageAdapter) GenerateImage(context.Context, provider.ImageGenerationRequest) (*provider.Response, error) {
+	a.generationCalls.Add(1)
+	return nil, errors.New("unexpected image generation")
 }
 
 func (webRateLimitAdapter) Provider() account.Provider { return account.ProviderWeb }
