@@ -1,0 +1,95 @@
+backend/internal/infra/provider/web/quota_test.go
+  s_66f58e62c51c03::t_32d0a8d131e61c 83,111,230
+backend/internal/infra/provider/web/statsig.go
+  s_66f58e62c51c03::t_99a73cf0a29130 29,31,43-45,83-86,88-98,101-102,105,110,114,120,122,124,129,139,145,147,149,174,179,181,190,193-201,208,211,225
+  s_66f58e62c51c03::t_03570359b3481b 8,57,61-62,123,126-128,130-138,140-144,146,162,170,184,187,214,217-219,236
+  s_66f58e62c51c03::t_d1f9a5714a7c45 414,423,444,450
+  s_66f58e62c51c03::t_107506bfa8cafe 42,79,108-109,115,117,121,152-153,239-243,246,252
+  s_66f58e62c51c03::t_d96989912fb559 30,55,73,103,125,188-189,191-192,202-207,209-210
+  s_66f58e62c51c03::t_18645f2d1466f8 32,56,74,154-157,161,169,415,417
+  s_66f58e62c51c03::t_57c937799b4469 20,395,397,404,406,409,420
+backend/internal/infra/provider/web/quota.go
+  s_66f58e62c51c03::t_57c937799b4469 152-154
+  s_66f58e62c51c03::t_2d8f74d1444800 151
+backend/internal/infra/provider/provider.go
+  s_66f58e62c51c03::t_57c937799b4469 22
+backend/internal/application/gateway/service_test.go
+  s_66f58e62c51c03::t_0a4f647948f502 414-573,1142-1148,1286-1323
+  s_66f58e62c51c03::t_e114a3dcb3a594 1324
+backend/internal/infra/provider/web/image.go
+  s_66f58e62c51c03::t_5a73afc6bcf4ab 34-37,1159,1162-1166,1187-1189
+  s_66f58e62c51c03::t_2d8f74d1444800 936
+  s_66f58e62c51c03::t_eeb54fc393b0bb 1182,1244
+  s_66f58e62c51c03::t_71897bf481f463 1149
+  s_66f58e62c51c03::t_3a2605cec1b3de 673,873,924,927
+  s_66f58e62c51c03::t_31a394e4c68ee6 1177,1181,1183-1184,1214-1243,1245-1252,1264
+  s_66f58e62c51c03::t_2a9a8eb40ea2ae 649,871
+  s_66f58e62c51c03::t_57c937799b4469 937-940
+backend/internal/app/startup.go
+  s_66f58e62c51c03::t_4e5ac8179655f1 324,334
+backend/internal/infra/provider/web/chat.go
+  s_66f58e62c51c03::t_57c937799b4469 327-331
+  s_66f58e62c51c03::t_2d8f74d1444800 326
+backend/internal/infra/provider/web/headers.go
+  s_66f58e62c51c03::t_2d8f74d1444800 12-20
+backend/internal/infra/provider/web/statsig_test.go
+  s_66f58e62c51c03::t_e3771a1dab6868 262,405-433,529
+  s_66f58e62c51c03::t_57c937799b4469 18,493-495,557,561-562
+  s_66f58e62c51c03::t_c68894f72d82ba 264-404
+  s_66f58e62c51c03::t_2ac5d60a843f8c 12-13,25-30,117-118,138-139,142,146,150-151,153,157-158,161-162,166-167,170-172,175-176,206,210,213,216-261,502,504-517,521,524-527
+  s_66f58e62c51c03::t_18645f2d1466f8 528,531-546,563
+  s_66f58e62c51c03::t_f23ff03174d152 434-483
+  s_66f58e62c51c03::t_8abf038f16848d 263
+  s_66f58e62c51c03::t_ab08fdb8b6b4fe 530
+backend/internal/infra/provider/web/security_test.go
+  s_66f58e62c51c03::t_addb69fb233e43 86-106
+  s_66f58e62c51c03::t_d88f58179cf788 57-85
+backend/internal/infra/provider/web/protocol_test.go
+  s_66f58e62c51c03::t_4c5ec76c723d55 270-302
+  s_66f58e62c51c03::t_9ad7eeb1d58341 690-696,700-704
+  s_66f58e62c51c03::t_5a73afc6bcf4ab 697-699
+  s_66f58e62c51c03::t_32d0a8d131e61c 226
+  s_66f58e62c51c03::t_cb39aa31ff85c7 656-689
+  s_66f58e62c51c03::t_1d7c0e674e4261 9
+  s_66f58e62c51c03::t_35bcf80d3b6932 581-624
+  s_66f58e62c51c03::t_eeb54fc393b0bb 625-655
+backend/internal/infra/provider/web/video.go
+  s_66f58e62c51c03::t_2a9a8eb40ea2ae 91
+backend/internal/infra/provider/web/attachments.go
+  s_66f58e62c51c03::t_2a9a8eb40ea2ae 66
+backend/internal/infra/egress/manager.go
+  s_66f58e62c51c03::t_57c937799b4469 60,329-330
+  s_66f58e62c51c03::t_99a73cf0a29130 4,221,223-224,227-230,243-266
+  s_66f58e62c51c03::t_6cdf14980a3860 352-362
+  s_66f58e62c51c03::t_91327d645c1dfe 267
+backend/internal/infra/egress/manager_test.go
+  s_66f58e62c51c03::t_57c937799b4469 299,302-323
+  s_66f58e62c51c03::t_6cdf14980a3860 262,275-276,281-298,300
+  s_66f58e62c51c03::t_32d0a8d131e61c 8
+  s_66f58e62c51c03::t_c68894f72d82ba 6,19-72
+  s_66f58e62c51c03::t_43206efa61076a 73
+  s_66f58e62c51c03::t_272a27e69794c9 301
+backend/internal/application/gateway/image.go
+  s_66f58e62c51c03::t_32d0a8d131e61c 5
+  s_66f58e62c51c03::t_57c937799b4469 188
+backend/internal/application/gateway/video.go
+  s_66f58e62c51c03::t_57c937799b4469 287-289
+backend/internal/application/gateway/service.go
+  s_66f58e62c51c03::t_4aa78a135548aa 486-487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2b929cc7772bcd9a7bf986220909892d102cfa16",
+  "prompts": {},
+  "sessions": {
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
