@@ -251,7 +251,10 @@ func (s *Service) ReloadPersisted(ctx context.Context) error {
 }
 
 func applyDomainConfig(base config.Config, value settingsdomain.Config) config.Config {
-	base.Server.MaxConcurrentRequests = value.Server.MaxConcurrentRequests
+	// Legacy runtime_settings rows predate Server; zero must not wipe yaml/defaults.
+	if value.Server.MaxConcurrentRequests > 0 {
+		base.Server.MaxConcurrentRequests = value.Server.MaxConcurrentRequests
+	}
 	capacityWait := value.Routing.CapacityWait
 	if capacityWait <= 0 {
 		capacityWait = base.Routing.CapacityWait.Value()
@@ -269,9 +272,12 @@ func applyDomainConfig(base config.Config, value settingsdomain.Config) config.C
 		MediaConcurrency: value.ProviderWeb.MediaConcurrency, AllowNSFW: value.ProviderWeb.AllowNSFW,
 		RecoveryBackoffBase: config.Duration(value.ProviderWeb.RecoveryBackoffBase), RecoveryBackoffMax: config.Duration(value.ProviderWeb.RecoveryBackoffMax),
 	}
-	base.Provider.Console = config.ConsoleProviderConfig{
-		BaseURL: value.ProviderConsole.BaseURL, UserAgent: value.ProviderConsole.UserAgent,
-		ChatTimeout: config.Duration(value.ProviderConsole.ChatTimeout),
+	// Legacy runtime_settings may omit ProviderConsole; empty BaseURL must not wipe defaults/yaml.
+	if strings.TrimSpace(value.ProviderConsole.BaseURL) != "" {
+		base.Provider.Console = config.ConsoleProviderConfig{
+			BaseURL: value.ProviderConsole.BaseURL, UserAgent: value.ProviderConsole.UserAgent,
+			ChatTimeout: config.Duration(value.ProviderConsole.ChatTimeout),
+		}
 	}
 	randomDelay := time.Duration(-1)
 	if value.Batch.RandomDelay != nil {
