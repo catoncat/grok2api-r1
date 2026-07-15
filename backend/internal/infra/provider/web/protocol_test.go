@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -222,7 +223,7 @@ func TestChatImageUploadFeedsFileMetadataIntoConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	content, _ := json.Marshal([]any{
 		map[string]any{"type": "text", "text": "inspect"},
 		map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURI}},
@@ -263,6 +264,39 @@ func (egressRepositoryStub) UpdateEgressNode(context.Context, egressdomain.Node)
 }
 
 func (egressRepositoryStub) DeleteEgressNode(context.Context, uint64) error {
+	return errors.New("unsupported")
+}
+
+type fixedEgressRepositoryStub struct{ nodes []egressdomain.Node }
+
+func (s fixedEgressRepositoryStub) ListEgressNodes(_ context.Context, scope egressdomain.Scope, _ repository.SortQuery) ([]egressdomain.Node, error) {
+	values := make([]egressdomain.Node, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		if node.Scope == scope {
+			values = append(values, node)
+		}
+	}
+	return values, nil
+}
+
+func (s fixedEgressRepositoryStub) GetEgressNode(_ context.Context, id uint64) (egressdomain.Node, error) {
+	for _, node := range s.nodes {
+		if node.ID == id {
+			return node, nil
+		}
+	}
+	return egressdomain.Node{}, errors.New("not found")
+}
+
+func (fixedEgressRepositoryStub) CreateEgressNode(context.Context, egressdomain.Node) (egressdomain.Node, error) {
+	return egressdomain.Node{}, errors.New("unsupported")
+}
+
+func (fixedEgressRepositoryStub) UpdateEgressNode(context.Context, egressdomain.Node) (egressdomain.Node, error) {
+	return egressdomain.Node{}, errors.New("unsupported")
+}
+
+func (fixedEgressRepositoryStub) DeleteEgressNode(context.Context, uint64) error {
 	return errors.New("unsupported")
 }
 
@@ -541,6 +575,130 @@ func TestImagineCollectorSettlesModeratedSlots(t *testing.T) {
 func TestGeneratedImageAssetHostsRemainStrict(t *testing.T) {
 	if !trustedImageAssetHost("assets.grok.com") || !trustedImageAssetHost("imagine-public.x.ai") || !trustedImageAssetHost("imgen.x.ai") || trustedImageAssetHost("example.com") {
 		t.Fatal("generated image host allowlist is incorrect")
+	}
+}
+
+func TestGeneratedImageDirectDownloadCarriesSessionIdentity(t *testing.T) {
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedToken, err := cipher.Encrypt("token-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedCookie, err := cipher.Encrypt("cf_clearance=clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := infraegress.NewManager(fixedEgressRepositoryStub{nodes: []egressdomain.Node{{
+		ID: 9, Name: "asset", Scope: egressdomain.ScopeWebAsset, Enabled: true, Health: 1,
+		UserAgent: "test-agent", EncryptedCloudflareCookie: encryptedCookie,
+	}}}, cipher)
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.Hostname() != "assets.grok.com" || request.Header.Get("User-Agent") != "test-agent" {
+			t.Fatalf("request host=%q User-Agent=%q", request.URL.Hostname(), request.Header.Get("User-Agent"))
+		}
+		cookie := request.Header.Get("Cookie")
+		for _, expected := range []string{"sso=token-value", "sso-rw=token-value", "cf_clearance=clear"} {
+			if !strings.Contains(cookie, expected) {
+				t.Fatalf("direct asset cookie missing %q", expected)
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK, Status: "200 OK", Header: http.Header{"Content-Type": []string{"image/jpeg"}},
+			Body: io.NopCloser(strings.NewReader("image-bytes")),
+		}, nil
+	})}
+	adapter := &Adapter{egress: manager, cipher: cipher, assetClient: client}
+	raw, err := adapter.downloadImage(context.Background(), account.Credential{ID: 31, EncryptedAccessToken: encryptedToken}, "https://assets.grok.com/generated/test.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || string(raw) != "image-bytes" {
+		t.Fatalf("calls=%d raw=%q", calls, raw)
+	}
+}
+
+func TestGeneratedImageDirectNotFoundDoesNotRetryThroughEgress(t *testing.T) {
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedToken, err := cipher.Encrypt("token-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := infraegress.NewManager(fixedEgressRepositoryStub{nodes: []egressdomain.Node{{
+		ID: 9, Name: "asset", Scope: egressdomain.ScopeWebAsset, Enabled: true, Health: 1,
+		UserAgent: "test-agent",
+	}}}, cipher)
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader("missing")),
+		}, nil
+	})}
+	adapter := &Adapter{egress: manager, cipher: cipher, assetClient: client}
+	_, err = adapter.downloadImage(context.Background(), account.Credential{ID: 31, EncryptedAccessToken: encryptedToken}, "https://assets.grok.com/generated/missing.jpg")
+	if err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("download error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("direct calls = %d, want 1", calls)
+	}
+}
+
+func TestGeneratedImageDirectInvalidContentDoesNotRetryThroughEgress(t *testing.T) {
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedToken, err := cipher.Encrypt("token-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := infraegress.NewManager(fixedEgressRepositoryStub{nodes: []egressdomain.Node{{
+		ID: 9, Name: "asset", Scope: egressdomain.ScopeWebAsset, Enabled: true, Health: 1,
+		UserAgent: "test-agent",
+	}}}, cipher)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		calls++
+		cancel()
+		return &http.Response{
+			StatusCode: http.StatusOK, Status: "200 OK", Header: http.Header{"Content-Type": []string{"text/html"}},
+			Body: io.NopCloser(strings.NewReader("not an image")),
+		}, nil
+	})}
+	adapter := &Adapter{egress: manager, cipher: cipher, assetClient: client}
+	_, err = adapter.downloadImage(ctx, account.Credential{ID: 31, EncryptedAccessToken: encryptedToken}, "https://assets.grok.com/generated/not-an-image.jpg")
+	if !errors.Is(err, errInvalidGeneratedImageResponse) {
+		t.Fatalf("download error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("direct calls = %d, want 1", calls)
+	}
+}
+
+func TestGeneratedImageDirectFallbackPolicy(t *testing.T) {
+	if !shouldFallbackDirectImage(http.StatusForbidden, nil) {
+		t.Fatal("403 must fall back to the configured image egress")
+	}
+	if !shouldFallbackDirectImage(0, errors.New("transport failed")) {
+		t.Fatal("transport failures must fall back to the configured image egress")
+	}
+	if shouldFallbackDirectImage(http.StatusOK, fmt.Errorf("%w: text/html", errInvalidGeneratedImageResponse)) {
+		t.Fatal("invalid content received over HTTP must not spend residential bandwidth on a duplicate download")
+	}
+	if shouldFallbackDirectImage(http.StatusNotFound, nil) || shouldFallbackDirectImage(http.StatusInternalServerError, nil) {
+		t.Fatal("non-auth HTTP failures must not spend residential bandwidth on a duplicate download")
 	}
 }
 

@@ -411,6 +411,166 @@ func TestGatewayPreservesRepeatedSystemicForbiddenWithoutCoolingAccounts(t *test
 	}
 }
 
+func TestWebConversationForbiddenFailsOverToDifferentAccount(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "web-conversation-forbidden-failover.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	responseRepo := relational.NewResponseRepository(database)
+	keyRepo := relational.NewClientKeyRepository(database)
+	now := time.Now().UTC()
+	credentials := make([]account.Credential, 0, 2)
+	for index, name := range []string{"web-chat-first", "web-chat-second"} {
+		credential, _, createErr := accountRepo.UpsertByIdentity(ctx, account.Credential{
+			Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, WebTier: account.WebTierBasic,
+			Name: name, SourceKey: name, EncryptedAccessToken: name, Enabled: true,
+			AuthStatus: account.AuthStatusActive, Priority: 200 - index*100, MaxConcurrent: 1,
+		})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if err := accountRepo.SaveQuotaWindows(ctx, credential.ID, account.WebTierBasic, now, []account.QuotaWindow{{
+			AccountID: credential.ID, Mode: "fast", Remaining: 3, Total: 10,
+			WindowSeconds: 3600, Source: account.QuotaSourceUpstream, SyncedAt: &now,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"grok-web-failover-chat"}, now); err != nil {
+			t.Fatal(err)
+		}
+		credentials = append(credentials, credential)
+	}
+	if err := modelRepo.UpsertRoutes(ctx, []modeldomain.Route{{
+		PublicID: "grok-web-failover-chat", Provider: account.ProviderWeb, UpstreamModel: "grok-web-failover-chat",
+		Capability: modeldomain.CapabilityChat, Enabled: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := keyRepo.Create(ctx, clientkey.Key{
+		Name: "web-chat-failover-key", Prefix: "web-chat-failover", SecretHash: strings.Repeat("a", 64), EncryptedSecret: "encrypted",
+		Enabled: true, RPMLimit: 60, MaxConcurrent: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := &webForbiddenFailoverAdapter{firstID: credentials[0].ID}
+	registry := provider.NewRegistry(adapter)
+	sticky := memory.NewStickyStore()
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
+	selector := NewSelector(accountRepo, memory.NewConcurrencyLimiter(), sticky, registry, time.Hour, time.Second, time.Minute)
+	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(keyRepo, nil, nil, 60, 4, nil), registry, selector, responseRepo, 2)
+
+	result, err := service.CreateChatCompletion(ctx, Input{
+		RequestID: "req-web-conversation-forbidden", ClientKey: key, PublicModel: "grok-web-failover-chat",
+		Body: []byte(`{"model":"grok-web-failover-chat","messages":[{"role":"user","content":"hello"}]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Finalize(Usage{}, "", "")
+	_ = result.Body.Close()
+	if string(body) != `{"id":"web-chat-success"}` {
+		t.Fatalf("response body = %q", body)
+	}
+	attempts := adapter.ConversationAttempts()
+	if len(attempts) != 2 || attempts[0] != credentials[0].ID || attempts[1] == attempts[0] || attempts[1] != credentials[1].ID {
+		t.Fatalf("conversation account attempts = %#v", attempts)
+	}
+}
+
+func TestWebImageForbiddenFailsOverToDifferentAccount(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "web-image-forbidden-failover.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	responseRepo := relational.NewResponseRepository(database)
+	keyRepo := relational.NewClientKeyRepository(database)
+	now := time.Now().UTC()
+	credentials := make([]account.Credential, 0, 2)
+	for index, name := range []string{"web-image-first", "web-image-second"} {
+		credential, _, createErr := accountRepo.UpsertByIdentity(ctx, account.Credential{
+			Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, WebTier: account.WebTierSuper,
+			Name: name, SourceKey: name, EncryptedAccessToken: name, Enabled: true,
+			AuthStatus: account.AuthStatusActive, Priority: 200 - index*100, MaxConcurrent: 1,
+		})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if err := accountRepo.SaveQuotaWindows(ctx, credential.ID, account.WebTierSuper, now, []account.QuotaWindow{{
+			AccountID: credential.ID, Mode: "fast", Remaining: 3, Total: 10,
+			WindowSeconds: 3600, Source: account.QuotaSourceUpstream, SyncedAt: &now,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"grok-web-failover-image"}, now); err != nil {
+			t.Fatal(err)
+		}
+		credentials = append(credentials, credential)
+	}
+	if err := modelRepo.UpsertRoutes(ctx, []modeldomain.Route{{
+		PublicID: "grok-web-failover-image", Provider: account.ProviderWeb, UpstreamModel: "grok-web-failover-image",
+		Capability: modeldomain.CapabilityImage, Enabled: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := keyRepo.Create(ctx, clientkey.Key{
+		Name: "web-image-failover-key", Prefix: "web-image-failover", SecretHash: strings.Repeat("b", 64), EncryptedSecret: "encrypted",
+		Enabled: true, RPMLimit: 60, MaxConcurrent: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := &webForbiddenFailoverAdapter{firstID: credentials[0].ID}
+	registry := provider.NewRegistry(adapter)
+	sticky := memory.NewStickyStore()
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
+	selector := NewSelector(accountRepo, memory.NewConcurrencyLimiter(), sticky, registry, time.Hour, time.Second, time.Minute)
+	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(keyRepo, nil, nil, 60, 4, nil), registry, selector, responseRepo, 2)
+
+	result, err := service.GenerateImage(ctx, ImageGenerationInput{
+		RequestID: "req-web-image-forbidden", ClientKey: key, PublicModel: "grok-web-failover-image",
+		Prompt: "draw", Count: 1, ResponseFormat: "url",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Finalize(Usage{}, "", "")
+	_ = result.Body.Close()
+	if string(body) != `{"created":1,"data":[{"url":"https://example.com/success.png"}]}` {
+		t.Fatalf("response body = %q", body)
+	}
+	attempts := adapter.ImageAttempts()
+	if len(attempts) != 2 || attempts[0] != credentials[0].ID || attempts[1] == attempts[0] || attempts[1] != credentials[1].ID {
+		t.Fatalf("image account attempts = %#v", attempts)
+	}
+}
+
 func TestGatewayRefreshesAndRetriesBuildPermissionDenialOnce(t *testing.T) {
 	ctx := context.Background()
 	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "auth-rescue.db"))
@@ -979,6 +1139,13 @@ type webChatQuotaAdapter struct {
 	synced chan string
 }
 
+type webForbiddenFailoverAdapter struct {
+	mu                   sync.Mutex
+	firstID              uint64
+	conversationAttempts []uint64
+	imageAttempts        []uint64
+}
+
 type credentialFailureImageAdapter struct {
 	generationCalls atomic.Int64
 }
@@ -1114,6 +1281,45 @@ func (a *webChatQuotaAdapter) SyncQuotaMode(_ context.Context, credential accoun
 		AccountID: credential.ID, Mode: mode, Remaining: 17, Total: 20,
 		WindowSeconds: 3600, SyncedAt: &now, Source: account.QuotaSourceUpstream,
 	}, nil
+}
+
+func (a *webForbiddenFailoverAdapter) Provider() account.Provider { return account.ProviderWeb }
+func (a *webForbiddenFailoverAdapter) Definition() provider.Definition {
+	definition := testConversationDefinition(account.ProviderWeb)
+	definition.Media.ImageGeneration = true
+	return definition
+}
+func (a *webForbiddenFailoverAdapter) QuotaMode(string) string { return "fast" }
+func (a *webForbiddenFailoverAdapter) TierOrder(string) []account.WebTier {
+	return []account.WebTier{account.WebTierBasic, account.WebTierSuper, account.WebTierHeavy}
+}
+func (a *webForbiddenFailoverAdapter) ForwardResponse(_ context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {
+	a.mu.Lock()
+	a.conversationAttempts = append(a.conversationAttempts, request.Credential.ID)
+	a.mu.Unlock()
+	if request.Credential.ID == a.firstID {
+		return &provider.Response{StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"anti-bot"}`))}, nil
+	}
+	return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"web-chat-success"}`))}, nil
+}
+func (a *webForbiddenFailoverAdapter) GenerateImage(_ context.Context, request provider.ImageGenerationRequest) (*provider.Response, error) {
+	a.mu.Lock()
+	a.imageAttempts = append(a.imageAttempts, request.Credential.ID)
+	a.mu.Unlock()
+	if request.Credential.ID == a.firstID {
+		return &provider.Response{StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"anti-bot"}`))}, nil
+	}
+	return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"url":"https://example.com/success.png"}]}`))}, nil
+}
+func (a *webForbiddenFailoverAdapter) ConversationAttempts() []uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]uint64(nil), a.conversationAttempts...)
+}
+func (a *webForbiddenFailoverAdapter) ImageAttempts() []uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]uint64(nil), a.imageAttempts...)
 }
 
 func (a *failoverAdapter) Provider() account.Provider { return account.ProviderBuild }

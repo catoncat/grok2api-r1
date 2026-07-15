@@ -3,7 +3,9 @@ package egress
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,61 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 	"github.com/chenyme/grok2api/backend/internal/repository"
 )
+
+func TestAffinitySelectionSpreadsAcrossHealthyNodes(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 1}
+	}
+	for index := 0; index < 8; index++ {
+		nodes[index].Health = 0.7
+	}
+	counts := make(map[uint64]int)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if selected.Health < 0.8 {
+			t.Fatalf("selected unhealthy node %d", selected.ID)
+		}
+		counts[selected.ID]++
+	}
+	if len(counts) != 7 {
+		t.Fatalf("selected healthy nodes=%d, want 7", len(counts))
+	}
+}
+
+func TestAffinitySelectionDoesNotCollapseWhenAllNodesAreDegraded(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 0.7}
+	}
+	counts := make(map[uint64]int)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		counts[selected.ID]++
+	}
+	if len(counts) != len(nodes) {
+		t.Fatalf("selected degraded nodes=%d, want %d", len(counts), len(nodes))
+	}
+}
+
+func TestAffinitySelectionOnlyRemapsAssignmentsFromRemovedNode(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 1}
+	}
+	remaining := append([]domain.Node(nil), nodes[:14]...)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		affinity := fmt.Sprintf("%d", accountID)
+		before := manager.selectNode(nodes, affinity)
+		after := manager.selectNode(remaining, affinity)
+		if before.ID != 15 && after.ID != before.ID {
+			t.Fatalf("account %d moved from node %d to node %d", accountID, before.ID, after.ID)
+		}
+	}
+}
 
 func TestDirectFallbackRebuildsClientAfterAntiBotRejection(t *testing.T) {
 	manager := &Manager{clients: map[clientCacheKey]cachedClient{{nodeID: 0, scope: domain.ScopeWeb, fingerprint: "web"}: {}}}
@@ -202,7 +259,7 @@ func TestBuildForbiddenDoesNotPoisonEgressNode(t *testing.T) {
 	}
 }
 
-func TestWebForbiddenStillRebuildsBrowserSession(t *testing.T) {
+func TestWebForbiddenRequiresConfirmationBeforePoisoningNode(t *testing.T) {
 	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	if err != nil {
 		t.Fatal(err)
@@ -215,11 +272,54 @@ func TestWebForbiddenStillRebuildsBrowserSession(t *testing.T) {
 	}
 	lease.Release()
 	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
-	if repository.updates != 1 || repository.node.Health >= 1 || repository.node.LastError != "anti-bot rejection" {
-		t.Fatalf("web 403 feedback = updates=%d node=%#v", repository.updates, repository.node)
+	if repository.updates != 1 || repository.node.Health != 1 || repository.node.FailureCount != 1 || repository.node.LastError != "web rejection unconfirmed" {
+		t.Fatalf("first web 403 feedback = updates=%d node=%#v", repository.updates, repository.node)
 	}
 	if managerHasClientForNode(manager, 1) {
 		t.Fatal("web browser session was not invalidated after 403")
+	}
+	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+	if repository.updates != 2 || repository.node.Health >= 1 || repository.node.FailureCount != 2 || repository.node.LastError != "anti-bot rejection" {
+		t.Fatalf("confirmed web 403 feedback = updates=%d node=%#v", repository.updates, repository.node)
+	}
+}
+
+func TestWebSuccessClearsUnconfirmedRejection(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1}}
+	manager := NewManager(repository, cipher)
+	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+	manager.Feedback(context.Background(), 1, http.StatusOK, nil)
+	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+	if repository.node.Health != 1 || repository.node.FailureCount != 1 || repository.node.LastError != "web rejection unconfirmed" {
+		t.Fatalf("web feedback after recovery = %#v", repository.node)
+	}
+}
+
+func TestConcurrentWebForbiddenFeedbackConfirmsNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1}}
+	manager := NewManager(repository, cipher)
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+		}()
+	}
+	close(start)
+	wait.Wait()
+	if repository.updates != 2 || repository.node.FailureCount != 2 || repository.node.LastError != "anti-bot rejection" {
+		t.Fatalf("concurrent web feedback = updates=%d node=%#v", repository.updates, repository.node)
 	}
 }
 

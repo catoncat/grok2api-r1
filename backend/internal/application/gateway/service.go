@@ -483,8 +483,8 @@ attemptLoop:
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			body, _ := readRetryableBody(response.Body)
 			if egressForbidden {
-				// Web 403/code 7 表示出口浏览器会话被拒绝；Provider 已重建会话并降低节点健康，不应误伤账号。
-				delete(excluded, credential.ID)
+				// Web 403/code 7 也可能由账号或请求签名触发。Provider 负责累计
+				// 出口证据；本次请求改用另一个账号，避免同一可疑组合连续重试。
 				lease.Release()
 				lastErr = fmt.Errorf("Grok Web 出口会话被反机器人规则拒绝")
 				lastFailure = newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)

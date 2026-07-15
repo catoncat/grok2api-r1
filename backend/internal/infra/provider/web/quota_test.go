@@ -80,7 +80,7 @@ func TestSyncQuotaFetchesWeeklyOnlyAfterPaidTierIsConfirmed(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
+		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1),
 	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	snapshot, err := adapter.SyncQuota(context.Background(), account.Credential{ID: 2, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted})
 	if err != nil {
@@ -108,7 +108,7 @@ func TestSyncQuotaStopsAfterFirstUnauthorizedMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
+		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1),
 	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	_, err = adapter.SyncQuota(context.Background(), account.Credential{ID: 3, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted})
 	if !errors.Is(err, provider.ErrUnauthorized) {
@@ -227,7 +227,7 @@ func TestSyncQuotaCorrectsStoredSuperFromFreshWebQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
+		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1),
 	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	snapshot, err := adapter.SyncQuota(context.Background(), account.Credential{
 		ID: 1, WebTier: account.WebTierSuper, EncryptedAccessToken: encrypted,

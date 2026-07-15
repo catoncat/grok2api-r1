@@ -323,9 +323,12 @@ func (a *Adapter) openChat(ctx context.Context, credential account.Credential, p
 		lease.Release()
 		return nil, nil, nil, "", err
 	}
-	request.Header = buildHeaders(token, lease, "application/json")
-	applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/")
-	a.applySignedStatsig(requestCtx, request, token, lease)
+	request.Header = buildSignedHeaders(token, lease, "application/json")
+	if err := a.applySignedStatsig(requestCtx, request, token, lease); err != nil {
+		cancel()
+		lease.Release()
+		return nil, nil, nil, "", err
+	}
 	response, err := lease.Do(request)
 	if err != nil {
 		cancel()

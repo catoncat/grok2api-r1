@@ -19,6 +19,7 @@ var (
 	ErrAuthorizationDenied  = errors.New("authorization denied")
 	ErrCredentialLimit      = errors.New("credential count exceeds limit")
 	ErrUnauthorized         = errors.New("upstream credential unauthorized")
+	ErrRequestSigning       = errors.New("provider request signing failed")
 )
 
 // HTTPStatusError 允许流式或异步 Provider 在无法返回 Response 时保留上游状态码。

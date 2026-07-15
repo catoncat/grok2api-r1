@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -56,6 +57,7 @@ func (l *Lease) Release() {
 type Manager struct {
 	repository repository.EgressRepository
 	cipher     *security.Cipher
+	feedbackMu sync.Mutex
 	mu         sync.Mutex
 	clients    map[clientCacheKey]cachedClient
 	inflight   map[uint64]int
@@ -216,17 +218,16 @@ func fallbackScopes(scope domain.Scope) []domain.Scope {
 
 func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
 	if affinity != "" {
-		digest := sha256.Sum256([]byte(affinity))
-		selected := nodes[int(binary.BigEndian.Uint64(digest[:8])%uint64(len(nodes)))]
-		if selected.Health >= 0.8 || len(nodes) == 1 {
-			return selected
-		}
+		candidates := make([]domain.Node, 0, len(nodes))
 		for _, node := range nodes {
-			if node.Health > selected.Health {
-				selected = node
+			if node.Health >= 0.8 {
+				candidates = append(candidates, node)
 			}
 		}
-		return selected
+		if len(candidates) == 0 {
+			candidates = nodes
+		}
+		return rendezvousNode(candidates, affinity)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -237,6 +238,31 @@ func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
 		}
 	}
 	return best
+}
+
+func rendezvousNode(nodes []domain.Node, affinity string) domain.Node {
+	selected := nodes[0]
+	best := rendezvousScore(affinity, selected.ID)
+	for _, node := range nodes[1:] {
+		score := rendezvousScore(affinity, node.ID)
+		if bytes.Compare(score[:], best[:]) > 0 {
+			selected = node
+			best = score
+		}
+	}
+	return selected
+}
+
+func rendezvousScore(affinity string, nodeID uint64) [sha256.Size]byte {
+	var encodedNodeID [8]byte
+	binary.BigEndian.PutUint64(encodedNodeID[:], nodeID)
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(affinity))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(encodedNodeID[:])
+	var score [sha256.Size]byte
+	copy(score[:], hash.Sum(nil))
+	return score
 }
 
 func (m *Manager) clientFor(id uint64, scope domain.Scope, proxyURL, userAgent, cookies string) (cachedClient, error) {
@@ -300,6 +326,8 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		}
 		return
 	}
+	m.feedbackMu.Lock()
+	defer m.feedbackMu.Unlock()
 	value, err := m.repository.GetEgressNode(ctx, nodeID)
 	if err != nil {
 		return
@@ -321,11 +349,18 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		// 分类；仅凭状态码不能把标准 CLI 出口误判为 Web anti-bot。
 		return
 	case status == http.StatusForbidden:
-		value.FailureCount++
-		value.Health = max(0.05, value.Health*0.7)
+		confirmed := value.FailureCount > 0 && value.LastError == "web rejection unconfirmed"
+		if confirmed {
+			value.FailureCount++
+			value.Health = max(0.05, value.Health*0.7)
+			value.LastError = "anti-bot rejection"
+			kind = "anti_bot"
+		} else {
+			value.FailureCount = 1
+			value.LastError = "web rejection unconfirmed"
+			kind = "anti_bot_suspect"
+		}
 		value.CooldownUntil = nil
-		value.LastError = "anti-bot rejection"
-		kind = "anti_bot"
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)
 		m.mu.Unlock()

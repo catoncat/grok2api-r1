@@ -88,7 +88,7 @@ func (a *Adapter) prepareVideoReference(ctx context.Context, cfg Config, lease *
 	if err != nil {
 		return "", err
 	}
-	uploaded, err := a.uploadImage(ctx, cfg, lease, token, image, cfg.BaseURL+"/imagine")
+	uploaded, err := a.uploadImage(ctx, cfg, lease, token, image)
 	if err != nil {
 		return "", err
 	}

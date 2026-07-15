@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	domainegress "github.com/chenyme/grok2api/backend/internal/domain/egress"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/pkg/signerurl"
 	"golang.org/x/net/html"
 	"golang.org/x/sync/singleflight"
@@ -24,7 +26,10 @@ import (
 const (
 	defaultStatsigSignerURL = "https://grok.wodf.de/sign"
 	statsigCacheTTL         = time.Hour
-	statsigCacheMaxEntries  = 4096
+	statsigMetaMaxEntries   = 4096
+	statsigSignAttempts     = 3
+	statsigMetaAttempts     = 2
+	statsigInvalidateWindow = 30 * time.Second
 	statsigMetaBodyLimit    = 4 << 20
 	statsigResponseLimit    = 4 << 10
 )
@@ -34,14 +39,10 @@ type statsigCacheEntry struct {
 	expiresAt time.Time
 }
 
-type statsigSignResult struct {
-	value  string
-	source string
-}
-
-type statsigWarmTarget struct {
-	method string
-	target string
+type statsigMetaResult struct {
+	value      string
+	source     string
+	generation uint64
 }
 
 type statsigSigner struct {
@@ -51,8 +52,13 @@ type statsigSigner struct {
 	now              func() time.Time
 	mu               sync.Mutex
 	entries          map[string]statsigCacheEntry
+	recentSignatures map[string]time.Time
+	invalidations    map[string]time.Time
+	generation       uint64
 	refreshes        singleflight.Group
 }
+
+var errStatsigMetaInvalidated = errors.New("Statsig meta refresh invalidated")
 
 func newStatsigSigner() *statsigSigner {
 	return &statsigSigner{
@@ -64,140 +70,159 @@ func newStatsigSigner() *statsigSigner {
 		validateEndpoint: validateStatsigSignerEndpoint,
 		now:              time.Now,
 		entries:          make(map[string]statsigCacheEntry),
+		recentSignatures: make(map[string]time.Time),
+		invalidations:    make(map[string]time.Time),
 	}
 }
 
 func (s *statsigSigner) Sign(ctx context.Context, baseURL, signerURL, token string, lease *infraegress.Lease, method, target string) (string, string, error) {
-	key, path, err := statsigSignatureKey(baseURL, signerURL, method, target)
+	path, err := statsigSignaturePath(target)
 	if err != nil {
 		return "", "", err
 	}
-	if value, ok := s.cached(key, s.now().UTC()); ok {
-		return value, "cache", nil
-	}
-	value, err, _ := s.refreshes.Do(key, func() (any, error) {
-		now := s.now().UTC()
-		if cached, ok := s.cached(key, now); ok {
-			return statsigSignResult{value: cached, source: "cache"}, nil
+	for metaAttempt := 0; metaAttempt < statsigMetaAttempts; metaAttempt++ {
+		meta, metaErr := s.meta(ctx, baseURL, token, lease)
+		if metaErr != nil {
+			return "", "", metaErr
 		}
-		fresh, refreshErr := s.freshSignature(ctx, baseURL, signerURL, token, lease, method, path)
-		if refreshErr != nil {
-			if stale, ok := s.stale(key); ok {
-				return statsigSignResult{value: stale, source: "stale"}, nil
+		for signAttempt := 0; signAttempt < statsigSignAttempts; signAttempt++ {
+			value, signErr := s.requestSignature(ctx, signerURL, method, path, meta.value)
+			if signErr != nil {
+				return "", "", fmt.Errorf("Statsig 签名失败: %w", signErr)
 			}
-			return statsigSignResult{}, refreshErr
+			claimed, current := s.claimSignature(value, s.now().UTC(), meta.generation)
+			if !current {
+				break
+			}
+			if claimed {
+				return value, meta.source, nil
+			}
 		}
-		s.store(key, fresh, now.Add(statsigCacheTTL), now)
-		return statsigSignResult{value: fresh, source: "refresh"}, nil
-	})
-	if err != nil {
-		return "", "", err
+		if s.isGenerationCurrent(meta.generation) {
+			return "", "", fmt.Errorf("Statsig 签名服务连续返回重复值")
+		}
 	}
-	result := value.(statsigSignResult)
-	return result.value, result.source, nil
+	return "", "", errStatsigMetaInvalidated
 }
 
-// Warm 使用一次 metaContent 请求预热多个常用签名键，避免按账号或按路径重复抓取首页。
-func (s *statsigSigner) Warm(ctx context.Context, baseURL, signerURL, token string, lease *infraegress.Lease, targets []statsigWarmTarget) (int, error) {
-	now := s.now().UTC()
-	type pendingTarget struct {
-		key    string
-		method string
-		path   string
-	}
-	pending := make([]pendingTarget, 0, len(targets))
-	for _, target := range targets {
-		key, path, err := statsigSignatureKey(baseURL, signerURL, target.method, target.target)
-		if err != nil {
-			return 0, err
-		}
-		if _, ok := s.cached(key, now); ok {
-			continue
-		}
-		pending = append(pending, pendingTarget{key: key, method: target.method, path: path})
-	}
-	if len(pending) == 0 {
-		return 0, nil
-	}
-	meta, err := s.fetchMeta(ctx, baseURL, token, lease)
+// Warm 只预热 Grok 首页的 metaContent；最终签名必须按请求生成，不能复用。
+func (s *statsigSigner) Warm(ctx context.Context, baseURL, token string, lease *infraegress.Lease) (int, error) {
+	meta, err := s.meta(ctx, baseURL, token, lease)
 	if err != nil {
 		return 0, err
 	}
-	warmed := 0
-	for _, target := range pending {
-		value, signErr := s.requestSignature(ctx, signerURL, target.method, target.path, meta)
-		if signErr != nil {
-			return warmed, signErr
+	if meta.source == "meta_refresh" {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func (s *statsigSigner) meta(ctx context.Context, baseURL, token string, lease *infraegress.Lease) (statsigMetaResult, error) {
+	key := statsigMetaKey(baseURL)
+	for attempt := 0; attempt < statsigMetaAttempts; attempt++ {
+		if value, ok := s.cached(key, s.now().UTC()); ok {
+			return value, nil
 		}
-		s.store(target.key, value, now.Add(statsigCacheTTL), now)
-		warmed++
+		value, err, _ := s.refreshes.Do(key, func() (any, error) {
+			now := s.now().UTC()
+			if cached, ok := s.cached(key, now); ok {
+				return cached, nil
+			}
+			generation := s.currentGeneration()
+			fresh, refreshErr := s.fetchMeta(ctx, baseURL, token, lease)
+			if refreshErr != nil {
+				return statsigMetaResult{}, refreshErr
+			}
+			if !s.storeIfGeneration(key, fresh, now.Add(statsigCacheTTL), now, generation) {
+				return statsigMetaResult{}, errStatsigMetaInvalidated
+			}
+			return statsigMetaResult{value: fresh, source: "meta_refresh", generation: generation}, nil
+		})
+		if errors.Is(err, errStatsigMetaInvalidated) {
+			continue
+		}
+		if err != nil {
+			return statsigMetaResult{}, err
+		}
+		return value.(statsigMetaResult), nil
 	}
-	return warmed, nil
+	return statsigMetaResult{}, errStatsigMetaInvalidated
 }
 
-func (s *statsigSigner) freshSignature(ctx context.Context, baseURL, signerURL, token string, lease *infraegress.Lease, method, path string) (string, error) {
-	meta, err := s.fetchMeta(ctx, baseURL, token, lease)
-	if err != nil {
-		return "", err
-	}
-	signature, err := s.requestSignature(ctx, signerURL, method, path, meta)
-	if err == nil {
-		return signature, nil
-	}
-
-	meta, refreshErr := s.fetchMeta(ctx, baseURL, token, lease)
-	if refreshErr != nil {
-		return "", fmt.Errorf("刷新 Statsig metaContent: %w", refreshErr)
-	}
-	signature, retryErr := s.requestSignature(ctx, signerURL, method, path, meta)
-	if retryErr != nil {
-		return "", fmt.Errorf("Statsig 签名失败: %w", retryErr)
-	}
-	return signature, nil
-}
-
-func (s *statsigSigner) Invalidate(baseURL, signerURL, method, target string) {
-	key, _, err := statsigSignatureKey(baseURL, signerURL, method, target)
-	if err != nil {
+func (s *statsigSigner) Invalidate(baseURL string) {
+	key := statsigMetaKey(baseURL)
+	now := s.now().UTC()
+	s.mu.Lock()
+	if last, ok := s.invalidations[key]; ok && now.Before(last.Add(statsigInvalidateWindow)) {
+		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
 	delete(s.entries, key)
+	s.invalidations[key] = now
+	s.generation++
 	s.mu.Unlock()
 }
 
 func (s *statsigSigner) Clear() {
 	s.mu.Lock()
 	clear(s.entries)
+	clear(s.invalidations)
+	s.generation++
 	s.mu.Unlock()
 }
 
-func (s *statsigSigner) cached(key string, now time.Time) (string, bool) {
+func (s *statsigSigner) cached(key string, now time.Time) (statsigMetaResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.entries[key]
 	if !ok || entry.value == "" || !now.Before(entry.expiresAt) {
-		return "", false
+		return statsigMetaResult{}, false
 	}
-	return entry.value, true
+	return statsigMetaResult{value: entry.value, source: "meta_cache", generation: s.generation}, true
 }
 
-func (s *statsigSigner) stale(key string) (string, bool) {
+func (s *statsigSigner) currentGeneration() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.entries[key]
-	return entry.value, ok && validStatsigID(entry.value)
+	return s.generation
 }
 
-func (s *statsigSigner) store(key, value string, expiresAt, now time.Time) {
+func (s *statsigSigner) isGenerationCurrent(generation uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return generation == s.generation
+}
+
+func (s *statsigSigner) claimSignature(value string, now time.Time, generation uint64) (bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if generation != s.generation {
+		return false, false
+	}
+	for signature, seenAt := range s.recentSignatures {
+		if !now.Before(seenAt.Add(statsigCacheTTL)) {
+			delete(s.recentSignatures, signature)
+		}
+	}
+	if _, exists := s.recentSignatures[value]; exists {
+		return false, true
+	}
+	s.recentSignatures[value] = now
+	return true, true
+}
+
+func (s *statsigSigner) storeIfGeneration(key, value string, expiresAt, now time.Time, generation uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if generation != s.generation {
+		return false
+	}
 	for existingKey, entry := range s.entries {
 		if !now.Before(entry.expiresAt) {
 			delete(s.entries, existingKey)
 		}
 	}
-	if len(s.entries) >= statsigCacheMaxEntries {
+	if len(s.entries) >= statsigMetaMaxEntries {
 		oldestKey := ""
 		var oldestExpiry time.Time
 		for existingKey, entry := range s.entries {
@@ -208,19 +233,23 @@ func (s *statsigSigner) store(key, value string, expiresAt, now time.Time) {
 		delete(s.entries, oldestKey)
 	}
 	s.entries[key] = statsigCacheEntry{value: value, expiresAt: expiresAt}
+	return true
 }
 
-func statsigSignatureKey(baseURL, signerURL, method, target string) (string, string, error) {
+func statsigMetaKey(baseURL string) string {
+	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
+}
+
+func statsigSignaturePath(target string) (string, error) {
 	parsed, err := url.Parse(target)
 	if err != nil {
-		return "", "", fmt.Errorf("解析 Statsig 目标地址: %w", err)
+		return "", fmt.Errorf("解析 Statsig 目标地址: %w", err)
 	}
 	path := parsed.EscapedPath()
 	if path == "" {
 		path = "/"
 	}
-	method = strings.ToUpper(strings.TrimSpace(method))
-	return strings.TrimRight(baseURL, "/") + "\x00" + strings.TrimSpace(signerURL) + "\x00" + method + "\x00" + path, path, nil
+	return path, nil
 }
 
 func (s *statsigSigner) requestSignature(ctx context.Context, endpoint, method, path, metaContent string) (string, error) {
@@ -363,35 +392,35 @@ func validStatsigID(value string) bool {
 	return err == nil && len(decoded) == 70
 }
 
-func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request, token string, lease *infraegress.Lease) {
+func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request, token string, lease *infraegress.Lease) error {
 	if request == nil {
-		return
+		return fmt.Errorf("%w: request is nil", provider.ErrRequestSigning)
 	}
 	cfg := a.config()
 	request.Header.Del("x-statsig-id")
 	if cfg.StatsigMode == "manual" {
 		if value := strings.TrimSpace(cfg.StatsigManualValue); validStatsigID(value) {
 			request.Header.Set("x-statsig-id", value)
+			return nil
 		}
-		return
+		return fmt.Errorf("%w: manual Statsig value is invalid", provider.ErrRequestSigning)
 	}
 	if a.statsig == nil {
-		return
+		return fmt.Errorf("%w: Statsig signer is unavailable", provider.ErrRequestSigning)
 	}
 	value, source, err := a.statsig.Sign(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, request.Method, request.URL.String())
 	if err == nil {
 		request.Header.Set("x-statsig-id", value)
-		if source == "refresh" {
-			a.log().Info("web_statsig_refreshed", "method", request.Method, "path", request.URL.EscapedPath())
-		} else if source == "stale" {
-			a.log().Warn("web_statsig_refresh_failed_using_stale", "method", request.Method, "path", request.URL.EscapedPath())
+		if source == "meta_refresh" {
+			a.log().Info("web_statsig_meta_refreshed", "method", request.Method, "path", request.URL.EscapedPath())
 		}
-		return
+		return nil
 	}
 	a.log().Warn("web_statsig_fetch_failed", "method", request.Method, "path", request.URL.EscapedPath(), "error", err)
+	return fmt.Errorf("%w: %v", provider.ErrRequestSigning, err)
 }
 
-// WarmStatsig 只使用一个 Web 账号和一个出口租约预热共享签名，不会逐账号访问上游。
+// WarmStatsig 只使用一个 Web 账号和一个出口租约预热共享 meta，不会逐账号访问上游。
 func (a *Adapter) WarmStatsig(ctx context.Context, credential account.Credential) (int, error) {
 	cfg := a.config()
 	if cfg.StatsigMode == "manual" {
@@ -412,18 +441,13 @@ func (a *Adapter) WarmStatsig(ctx context.Context, credential account.Credential
 		return 0, err
 	}
 	defer lease.Release()
-	baseURL := strings.TrimRight(cfg.BaseURL, "/")
-	return a.statsig.Warm(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, []statsigWarmTarget{
-		{method: http.MethodPost, target: baseURL + "/rest/app-chat/conversations/new"},
-		{method: http.MethodPost, target: baseURL + "/rest/rate-limits"},
-		{method: http.MethodPost, target: baseURL + "/rest/media/post/create"},
-	})
+	return a.statsig.Warm(ctx, cfg.BaseURL, token, lease)
 }
 
 func (a *Adapter) invalidateSignedStatsig(method, target string) bool {
 	cfg := a.config()
 	if cfg.StatsigMode == "url" && a.statsig != nil {
-		a.statsig.Invalidate(cfg.BaseURL, cfg.StatsigSignerURL, method, target)
+		a.statsig.Invalidate(cfg.BaseURL)
 		if parsed, err := url.Parse(target); err == nil {
 			a.log().Info("web_statsig_invalidated", "method", method, "path", parsed.EscapedPath())
 		}

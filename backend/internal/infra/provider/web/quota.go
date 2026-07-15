@@ -148,9 +148,10 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 		if requestErr != nil {
 			return account.QuotaWindow{}, requestErr
 		}
-		request.Header = buildHeaders(token, lease, "application/json")
-		applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/")
-		a.applySignedStatsig(requestCtx, request, token, lease)
+		request.Header = buildSignedHeaders(token, lease, "application/json")
+		if err := a.applySignedStatsig(requestCtx, request, token, lease); err != nil {
+			return account.QuotaWindow{}, err
+		}
 		response, err = lease.Do(request)
 		if err != nil {
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)

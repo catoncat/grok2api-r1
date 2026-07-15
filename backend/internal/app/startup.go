@@ -321,7 +321,7 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		a.startup.setStatsig("warming", "正在预热共享签名", 0)
+		a.startup.setStatsig("warming", "正在预热 Statsig meta", 0)
 		values, err := a.accountRepo.ListEnabled(ctx, accountdomain.ProviderWeb)
 		if err == nil && len(values) == 0 {
 			a.startup.setStatsig("disabled", "没有启用的 Grok Web 账号", 0)
@@ -331,7 +331,7 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 			warmed, err = a.web.WarmStatsig(warmCtx, values[0])
 			cancel()
 			if err == nil {
-				a.startup.setStatsig("warm", "共享签名已预热", warmed)
+				a.startup.setStatsig("warm", "Statsig meta 已预热", warmed)
 			}
 		}
 		if err != nil && ctx.Err() == nil {
