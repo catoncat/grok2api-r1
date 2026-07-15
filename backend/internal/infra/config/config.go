@@ -165,10 +165,21 @@ type MediaConfig struct {
 	CleanupThresholdPercent int              `yaml:"-"`
 	CleanupInterval         Duration         `yaml:"-"`
 	Local                   LocalMediaConfig `yaml:"local"`
+	S3                      S3MediaConfig    `yaml:"s3"`
 }
 
 type LocalMediaConfig struct {
 	Path string `yaml:"path"`
+}
+
+type S3MediaConfig struct {
+	Endpoint        string `yaml:"endpoint"`
+	Region          string `yaml:"region"`
+	Bucket          string `yaml:"bucket"`
+	AccessKeyID     string `yaml:"accessKeyId"`
+	SecretAccessKey string `yaml:"secretAccessKey"`
+	Prefix          string `yaml:"prefix"`
+	PublicBaseURL   string `yaml:"publicBaseUrl"`
 }
 
 type RoutingConfig struct {
@@ -347,11 +358,21 @@ func (c Config) Validate() error {
 	default:
 		return errors.New("runtimeStore.driver 必须是 memory 或 redis")
 	}
-	if c.Media.Driver != "local" {
-		return errors.New("media.driver 当前仅支持 local")
+	if c.Media.Driver != "local" && c.Media.Driver != "s3" {
+		return errors.New("media.driver 当前仅支持 local 或 s3")
 	}
-	if strings.TrimSpace(c.Media.Local.Path) == "" {
-		return errors.New("media.local.path 不能为空")
+	if c.Media.Driver == "local" {
+		if strings.TrimSpace(c.Media.Local.Path) == "" {
+			return errors.New("media.local.path 不能为空")
+		}
+	}
+	if c.Media.Driver == "s3" {
+		if strings.TrimSpace(c.Media.S3.Bucket) == "" {
+			return errors.New("media.s3.bucket 不能为空")
+		}
+		if strings.TrimSpace(c.Media.S3.AccessKeyID) == "" || strings.TrimSpace(c.Media.S3.SecretAccessKey) == "" {
+			return errors.New("media.s3.accessKeyId 和 secretAccessKey 不能为空")
+		}
 	}
 	if c.Media.MaxImageBytes < 1<<20 || c.Media.MaxImageBytes > 32<<20 {
 		return errors.New("media.maxImageBytes 必须在 1 MiB 到 32 MiB 之间")
@@ -495,6 +516,7 @@ func defaultConfig() Config {
 			Driver: "local", MaxImageBytes: 32 << 20, MaxTotalBytes: 1 << 30,
 			CleanupThresholdPercent: 80, CleanupInterval: Duration(10 * time.Minute),
 			Local: LocalMediaConfig{Path: "./data/media"},
+			S3:    S3MediaConfig{Region: "auto"},
 		},
 		Routing: RoutingConfig{
 			StickyTTL:    Duration(time.Hour),

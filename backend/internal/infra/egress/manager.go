@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -285,12 +286,15 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		return
 	}
 	now := time.Now().UTC()
+	before := value.Health
+	kind := "noop"
 	switch {
 	case transportErr == nil && status >= 200 && status < 400:
 		value.Health = min(1, value.Health+0.1)
 		value.FailureCount = 0
 		value.CooldownUntil = nil
 		value.LastError = ""
+		kind = "success"
 	case status == http.StatusUnauthorized || status == http.StatusTooManyRequests:
 		return
 	case scope == domain.ScopeBuild && status == http.StatusForbidden:
@@ -302,6 +306,7 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		value.Health = max(0.05, value.Health*0.7)
 		value.CooldownUntil = nil
 		value.LastError = "anti-bot rejection"
+		kind = "anti_bot"
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)
 		m.mu.Unlock()
@@ -313,12 +318,29 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		value.CooldownUntil = &until
 		if transportErr != nil {
 			value.LastError = "transport error"
+			kind = "transport"
 		} else {
 			value.LastError = fmt.Sprintf("upstream status %d", status)
+			kind = "status"
 		}
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)
 		m.mu.Unlock()
+	}
+	crossed := before >= 0.5 && value.Health < 0.5
+	// Log failures and threshold crossings; skip routine success heals to keep volume low.
+	if kind != "success" || crossed {
+		slog.Default().Info("egress_feedback",
+			"node_id", nodeID,
+			"scope", string(scope),
+			"kind", kind,
+			"status", status,
+			"health_before", before,
+			"health_after", value.Health,
+			"failure_count", value.FailureCount,
+			"crossed_threshold", crossed,
+			"last_error", value.LastError,
+		)
 	}
 	if _, err := m.repository.UpdateEgressNode(ctx, value); err == nil {
 		m.invalidateNodes(value.Scope)

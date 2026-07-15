@@ -18,8 +18,6 @@ const (
 	startupCriticalWindow    = 2 * time.Minute
 	startupCriticalLimit     = 100
 	statsigWarmupInterval    = 15 * time.Minute
-	webQuotaStaleAfter       = 30 * time.Minute
-	webQuotaCatchupEvery     = 30 * time.Minute
 	modelCatalogStaleAfter   = 24 * time.Hour
 	modelCatalogCatchupEvery = 6 * time.Hour
 )
@@ -341,49 +339,6 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 			a.startup.setStatsig("unavailable", "预热失败，将由请求按需重试", 0)
 		}
 		resetTimer(timer, statsigWarmupInterval)
-	}
-}
-
-func (a *Application) queueDueWebQuotaRefresh(ctx context.Context) {
-	windows, err := a.accounts.ListDueWebQuotaWindows(ctx, time.Now().UTC(), 1000)
-	if err != nil {
-		a.logger.Warn("web_quota_startup_catchup_failed", "error", err)
-		a.startup.recordError(err)
-		return
-	}
-	for _, window := range windows {
-		a.accounts.QueueWebQuotaRefresh(window.AccountID, window.Mode)
-	}
-	a.startup.updateReport(func(report *startupReport) { report.DueWebQuotasQueued = len(windows) })
-	if len(windows) > 0 {
-		a.logger.Info("web_quota_startup_catchup_queued", "count", len(windows))
-	}
-}
-
-func (a *Application) runWebQuotaCatchup(ctx context.Context) {
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-		}
-		ids, err := a.accountRepo.ListStaleWebQuotaAccountIDs(ctx, time.Now().UTC().Add(-webQuotaStaleAfter), 100)
-		if err == nil && len(ids) > 0 {
-			runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-			var succeeded int
-			succeeded, _, err = a.accounts.SyncWebQuotaAccounts(runCtx, ids)
-			cancel()
-			a.startup.updateReport(func(report *startupReport) {
-				report.StaleWebQuotasFound = len(ids)
-				report.StaleWebQuotasSynced = succeeded
-			})
-		}
-		if err != nil && ctx.Err() == nil {
-			a.logger.Warn("web_quota_stale_catchup_failed", "error", err)
-		}
-		resetTimer(timer, webQuotaCatchupEvery)
 	}
 }
 

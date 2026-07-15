@@ -105,10 +105,30 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return nil, err
 	}
 	cfg = loadedConfig
-	localMediaStore, err := inframedia.NewLocalStore(cfg.Media.Local.Path)
-	if err != nil {
-		database.Close()
-		return nil, err
+	var mediaStore repository.MediaObjectStorage
+	switch cfg.Media.Driver {
+	case "s3":
+		s3Store, s3Err := inframedia.NewS3Store(inframedia.S3Config{
+			Endpoint:        cfg.Media.S3.Endpoint,
+			Region:          cfg.Media.S3.Region,
+			Bucket:          cfg.Media.S3.Bucket,
+			AccessKeyID:     cfg.Media.S3.AccessKeyID,
+			SecretAccessKey: cfg.Media.S3.SecretAccessKey,
+			Prefix:          cfg.Media.S3.Prefix,
+			PublicBaseURL:   cfg.Media.S3.PublicBaseURL,
+		})
+		if s3Err != nil {
+			database.Close()
+			return nil, s3Err
+		}
+		mediaStore = s3Store
+	default:
+		localStore, lErr := inframedia.NewLocalStore(cfg.Media.Local.Path)
+		if lErr != nil {
+			database.Close()
+			return nil, lErr
+		}
+		mediaStore = localStore
 	}
 	var rateLimiter repository.RateLimiter
 	var concurrency repository.ConcurrencyLimiter
@@ -151,7 +171,10 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		database.Close()
 		return nil, fmt.Errorf("不支持的运行态驱动: %s", cfg.RuntimeStore.Driver)
 	}
-	mediaService := mediaapp.NewService(mediaAssetRepo, mediaJobRepo, localMediaStore, refreshLock, mediaConfig(cfg))
+	mediaService := mediaapp.NewService(mediaAssetRepo, mediaJobRepo, mediaStore, refreshLock, mediaConfig(cfg))
+	if s3Store, ok := mediaStore.(*inframedia.S3Store); ok {
+		mediaService.SetURLProvider(s3Store)
+	}
 
 	egressManager := infraegress.NewManager(egressRepo, cipher)
 	cliAdapter := cliprovider.NewAdapter(cliprovider.Config{BaseURL: cfg.Provider.Build.BaseURL, ClientVersion: cfg.Provider.Build.ClientVersion, ClientIdentifier: cfg.Provider.Build.ClientIdentifier, TokenAuth: cfg.Provider.Build.TokenAuth, UserAgent: cfg.Provider.Build.UserAgent}, cipher)
@@ -389,10 +412,6 @@ func (a *Application) Run(ctx context.Context) error {
 		a.runStatsigWarmup(taskCtx)
 		return nil
 	})
-	startBackground("web_quota_startup_catchup", func(taskCtx context.Context) error {
-		a.runWebQuotaCatchup(taskCtx)
-		return nil
-	})
 	startBackground("model_catalog_startup_catchup", func(taskCtx context.Context) error {
 		a.runModelCatalogCatchup(taskCtx)
 		return nil
@@ -423,7 +442,6 @@ func (a *Application) Run(ctx context.Context) error {
 			})
 		})
 	}
-	a.queueDueWebQuotaRefresh(runCtx)
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

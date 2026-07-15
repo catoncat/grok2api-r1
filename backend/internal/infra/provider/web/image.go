@@ -25,9 +25,10 @@ import (
 )
 
 const (
-	maxGeneratedImages   = 10
-	mediaOutputAttempts  = 3
-	imageDownloadTimeout = 60 * time.Second
+	maxGeneratedImages     = 10
+	maxGeneratedImageBytes = 32 << 20
+	mediaOutputAttempts    = 3
+	imageDownloadTimeout   = 60 * time.Second
 )
 
 var errLiteImageReady = errors.New("Lite 图片已完成")
@@ -356,21 +357,21 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			}
 			return "", consumeErr
 		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
-		lease.Release()
-		if firstImage != "" {
-			return firstImage, nil
-		}
-		if len(parsed.Images) == 0 {
+		nodeID := lease.NodeID
+		if firstImage == "" && len(parsed.Images) == 0 {
 			parsed.Images = extractMarkdownImages(parsed.Text.String())
 		}
-		if len(parsed.Images) == 0 {
+		if firstImage == "" && len(parsed.Images) == 0 {
 			parsed.Images = extractCapturedImageURLs(capture.Bytes())
 		}
-		if len(parsed.Images) == 0 {
+		if firstImage == "" && len(parsed.Images) == 0 {
+			// IMPORTANT: do NOT Feedback(200) here. Empty stream / soft_stop is a failed
+			// generation; healing egress health on failure hides fleet wear until a later
+			// anti-bot wave crosses the health threshold in one poll.
 			diagnostics := inspectLiteCapture(capture.Bytes())
 			a.log().Warn("web_lite_image_not_found",
 				"account_id", credential.ID,
+				"egress_node_id", nodeID,
 				"captured_bytes", len(capture.Bytes()),
 				"frames", diagnostics.Frames,
 				"response_fields", diagnostics.ResponseFields,
@@ -383,7 +384,15 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 				"upstream_error_code", diagnostics.ErrorCode,
 				"upstream_error", diagnostics.ErrorMessage,
 			)
+			// Neutral for account-level soft_stop: no health heal, no anti-bot 403 mark.
+			// Transport-like soft signal would over-disable; leave health unchanged.
+			lease.Release()
 			return "", fmt.Errorf("Grok Web Lite 响应结束但未解析到最终图片")
+		}
+		a.egress.Feedback(context.WithoutCancel(ctx), nodeID, http.StatusOK, nil)
+		lease.Release()
+		if firstImage != "" {
+			return firstImage, nil
 		}
 		// Lite 上游固定生成两张，但每次查询只计一次 Fast 额度；按旧协议取首张并为 n 重复查询。
 		return parsed.Images[0], nil
@@ -997,16 +1006,24 @@ func (a *Adapter) saveImageWithRetry(ctx context.Context, raw []byte) (mediadoma
 }
 
 func (a *Adapter) imageBytes(ctx context.Context, credential account.Credential, image imagineImageValue) ([]byte, error) {
+	// Imagine WebSocket delivers URL and blob in the same frame. Once the frame
+	// is readable, blob bytes have already crossed the egress, so downloading the
+	// URL would only duplicate traffic. Lite/app-chat paths are URL-only.
 	if strings.TrimSpace(image.Blob) != "" {
 		raw, err := decodeImageBlob(image.Blob)
 		if err == nil {
+			a.log().Info("image_asset_download", "path", "blob", "bytes", len(raw))
 			return raw, nil
 		}
 		if strings.TrimSpace(image.URL) == "" {
 			return nil, err
 		}
+		a.log().Warn("image_asset_blob_decode_fallback", "error", err)
 	}
-	return a.downloadImage(ctx, credential, image.URL)
+	if strings.TrimSpace(image.URL) != "" {
+		return a.downloadImage(ctx, credential, image.URL)
+	}
+	return nil, fmt.Errorf("图片结果没有 URL 或 blob")
 }
 
 func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter, connection *websocket.Conn, lease *egress.Lease, credential account.Credential, streamID string, count int, format, ratio, resolution string, modelConfig imagineModelConfig) {
@@ -1107,11 +1124,76 @@ func writeImagineStreamFailure(writer io.Writer, streamID, code, message string)
 	})
 }
 
+func newDirectImageClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Generated assets must not inherit HTTP_PROXY/HTTPS_PROXY from the host.
+	transport.Proxy = nil
+	return &http.Client{
+		Transport: transport,
+		Timeout:   90 * time.Second,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 5 || request.URL.Scheme != "https" || !trustedImageAssetHost(request.URL.Hostname()) {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+}
+
+func shouldFallbackDirectImage(status int, err error) bool {
+	return err != nil || status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+func readGeneratedImageResponse(response *http.Response) ([]byte, error) {
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("下载图片返回 %d", response.StatusCode)
+	}
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]))
+	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+		return nil, fmt.Errorf("上游图片 Content-Type 无效")
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxGeneratedImageBytes+1))
+	if err != nil || len(raw) > maxGeneratedImageBytes {
+		return nil, fmt.Errorf("图片下载失败或超过 32 MiB")
+	}
+	return raw, nil
+}
+
 func (a *Adapter) downloadImage(ctx context.Context, credential account.Credential, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme != "https" || !trustedImageAssetHost(parsed.Hostname()) || parsed.User != nil {
 		return nil, fmt.Errorf("图片内容 URL 不受信任")
 	}
+
+	directClient := a.assetClient
+	if directClient == nil {
+		directClient = newDirectImageClient()
+	}
+	directRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	directRequest.Header.Set("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
+	directResponse, directErr := directClient.Do(directRequest)
+	directStatus := 0
+	if directErr == nil {
+		directStatus = directResponse.StatusCode
+		if directStatus >= 200 && directStatus < 300 {
+			raw, readErr := readGeneratedImageResponse(directResponse)
+			if readErr != nil {
+				return nil, readErr
+			}
+			a.log().Info("image_asset_download", "path", "direct", "host", parsed.Hostname(), "bytes", len(raw))
+			return raw, nil
+		}
+		_ = directResponse.Body.Close()
+	}
+	if !shouldFallbackDirectImage(directStatus, directErr) {
+		return nil, fmt.Errorf("直连下载图片返回 %d", directStatus)
+	}
+	a.log().Warn("image_asset_direct_fallback", "host", parsed.Hostname(), "status", directStatus, "error", directErr)
+
 	token, err := a.cipher.Decrypt(credential.EncryptedAccessToken)
 	if err != nil {
 		return nil, err
@@ -1122,6 +1204,7 @@ func (a *Adapter) downloadImage(ctx context.Context, credential account.Credenti
 	for attempt := 0; attempt < mediaOutputAttempts; attempt++ {
 		raw, retryable, attemptErr := a.downloadImageAttempt(downloadCtx, credential.ID, token, parsed.String())
 		if attemptErr == nil {
+			a.log().Info("image_asset_download", "path", "egress_fallback", "host", parsed.Hostname(), "bytes", len(raw))
 			return raw, nil
 		}
 		lastErr = attemptErr
