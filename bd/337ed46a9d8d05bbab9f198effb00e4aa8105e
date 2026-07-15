@@ -1,0 +1,19 @@
+backend/internal/application/settings/service.go
+  s_ad33ef1498ecf2::t_28e4e6abf823b3 254-257,275-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "bd337ed46a9d8d05bbab9f198effb00e4aa8105e",
+  "prompts": {},
+  "sessions": {
+    "s_ad33ef1498ecf2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f6321-0325-7ebf-985c-324d765d99f4",
+        "model": "grok-4.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
