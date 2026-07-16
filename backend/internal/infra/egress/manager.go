@@ -129,7 +129,10 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 		available = []domain.Node{{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}}
 	}
 	sort.SliceStable(available, func(i, j int) bool { return available[i].ID < available[j].ID })
-	selected := m.selectNode(available, affinity)
+	selected, ok := m.selectNode(available, affinity)
+	if !ok {
+		return nil, false, fmt.Errorf("当前没有可用的 %s 出口节点", scope)
+	}
 	proxyURL, err := m.cipher.Decrypt(selected.EncryptedProxyURL)
 	if err != nil {
 		return nil, false, err
@@ -219,28 +222,37 @@ func fallbackScopes(scope domain.Scope) []domain.Scope {
 	return []domain.Scope{scope}
 }
 
-func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
+func (m *Manager) selectNode(nodes []domain.Node, affinity string) (domain.Node, bool) {
+	safe := make([]domain.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if !strings.Contains(strings.ToLower(node.LastError), "anti-bot") {
+			safe = append(safe, node)
+		}
+	}
+	if len(safe) == 0 {
+		return domain.Node{}, false
+	}
 	if affinity != "" {
-		candidates := make([]domain.Node, 0, len(nodes))
-		for _, node := range nodes {
-			if node.Health >= affinityHealthFloor && !strings.Contains(strings.ToLower(node.LastError), "anti-bot") {
+		candidates := make([]domain.Node, 0, len(safe))
+		for _, node := range safe {
+			if node.Health >= affinityHealthFloor {
 				candidates = append(candidates, node)
 			}
 		}
 		if len(candidates) == 0 {
-			candidates = nodes
+			candidates = safe
 		}
-		return rendezvousNode(candidates, affinity)
+		return rendezvousNode(candidates, affinity), true
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	best := nodes[0]
-	for _, node := range nodes[1:] {
+	best := safe[0]
+	for _, node := range safe[1:] {
 		if m.inflight[node.ID] < m.inflight[best.ID] || (m.inflight[node.ID] == m.inflight[best.ID] && node.Health > best.Health) {
 			best = node
 		}
 	}
-	return best
+	return best, true
 }
 
 func rendezvousNode(nodes []domain.Node, affinity string) domain.Node {

@@ -27,7 +27,10 @@ func TestAffinitySelectionKeepsRecoverableNodesInMixedFleet(t *testing.T) {
 	}
 	counts := make(map[uint64]int)
 	for accountID := 1; accountID <= 10000; accountID++ {
-		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("ready fleet returned no node")
+		}
 		if selected.Health < affinityHealthFloor {
 			t.Fatalf("selected node below fleet floor %d", selected.ID)
 		}
@@ -49,7 +52,10 @@ func TestAffinitySelectionExcludesNodesBelowFleetFloor(t *testing.T) {
 	}
 	counts := make(map[uint64]int)
 	for accountID := 1; accountID <= 10000; accountID++ {
-		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("ready fleet returned no node")
+		}
 		if selected.Health < affinityHealthFloor {
 			t.Fatalf("selected node below fleet floor %d", selected.ID)
 		}
@@ -67,7 +73,10 @@ func TestAffinitySelectionExcludesConfirmedAntiBotBeforeFleetSync(t *testing.T) 
 		{ID: 2, Health: 0.7, LastError: "anti-bot rejection"},
 	}
 	for accountID := 1; accountID <= 1000; accountID++ {
-		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("safe node was not selected")
+		}
 		if selected.ID != 1 {
 			t.Fatalf("selected confirmed anti-bot node %d", selected.ID)
 		}
@@ -82,11 +91,25 @@ func TestAffinitySelectionDoesNotCollapseWhenEveryNodeIsBelowFleetFloor(t *testi
 	}
 	counts := make(map[uint64]int)
 	for accountID := 1; accountID <= 10000; accountID++ {
-		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("degraded but safe fleet returned no node")
+		}
 		counts[selected.ID]++
 	}
 	if len(counts) != len(nodes) {
 		t.Fatalf("selected fallback nodes=%d, want %d", len(counts), len(nodes))
+	}
+}
+
+func TestAffinitySelectionFailsClosedWhenEveryNodeIsConfirmedAntiBot(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := []domain.Node{
+		{ID: 1, Health: 1, LastError: "anti-bot rejection"},
+		{ID: 2, Health: 0.7, LastError: "upstream anti-bot challenge"},
+	}
+	if selected, ok := manager.selectNode(nodes, "account"); ok {
+		t.Fatalf("selected confirmed anti-bot node %d", selected.ID)
 	}
 }
 
@@ -99,8 +122,11 @@ func TestAffinitySelectionOnlyRemapsAssignmentsFromRemovedNode(t *testing.T) {
 	remaining := append([]domain.Node(nil), nodes[:14]...)
 	for accountID := 1; accountID <= 10000; accountID++ {
 		affinity := fmt.Sprintf("%d", accountID)
-		before := manager.selectNode(nodes, affinity)
-		after := manager.selectNode(remaining, affinity)
+		before, beforeOK := manager.selectNode(nodes, affinity)
+		after, afterOK := manager.selectNode(remaining, affinity)
+		if !beforeOK || !afterOK {
+			t.Fatal("healthy fleet returned no node")
+		}
 		if before.ID != 15 && after.ID != before.ID {
 			t.Fatalf("account %d moved from node %d to node %d", accountID, before.ID, after.ID)
 		}
