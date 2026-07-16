@@ -59,6 +59,7 @@ type statsigSigner struct {
 	localRefreshes   singleflight.Group
 	localMu          sync.Mutex
 	locals           map[string]statsigLocalChallenge
+	localGeneration  uint64
 	fetchLocal       func(context.Context, string, string, *infraegress.Lease) (statsigLocalChallenge, error)
 }
 
@@ -119,6 +120,9 @@ func (s *statsigSigner) Sign(ctx context.Context, baseURL, signerURL, token stri
 
 // Warm 只预热 Grok 首页的 metaContent；最终签名必须按请求生成，不能复用。
 func (s *statsigSigner) Warm(ctx context.Context, baseURL, token string, lease *infraegress.Lease) (int, error) {
+	if _, err := s.localSign(ctx, baseURL, token, lease, http.MethodPost, "/rest/app-chat/conversations/new"); err == nil {
+		return 1, nil
+	}
 	meta, err := s.meta(ctx, baseURL, token, lease)
 	if err != nil {
 		return 0, err
@@ -172,6 +176,7 @@ func (s *statsigSigner) Invalidate(baseURL string) {
 	delete(s.entries, key)
 	s.localMu.Lock()
 	clear(s.locals) // local entries are keyed by per-lease fingerprints, not base URL.
+	s.localGeneration++
 	s.localMu.Unlock()
 	s.invalidations[key] = now
 	s.generation++

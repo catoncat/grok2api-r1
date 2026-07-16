@@ -207,7 +207,7 @@ func discoverStatsigEngine(ctx context.Context, base, home, seed, curves string,
 	if len(paths) == 0 {
 		return nil, 0, 0, errors.New("no Statsig chunks")
 	}
-	client := &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Timeout: 12 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	seen := make(map[string]bool)
 	queue := append([]string(nil), paths...)
 	scanned, total := 0, 0
@@ -252,9 +252,9 @@ func statsigChunkPaths(source string, seen map[string]bool) []string {
 // chooses how to interpret these values; we only supply its current DOM input.
 func parseStatsigCurves(home string) (json.RawMessage, error) {
 	start := strings.Index(home, "[[{\"color\"")
-	escaped := false
+	escapedMode := false
 	if start < 0 {
-		start, escaped = strings.Index(home, `[[{\"color\"`), true
+		start, escapedMode = strings.Index(home, `[[{\"color\"`), true
 	}
 	if start < 0 {
 		return nil, errors.New("Statsig curves not found")
@@ -283,7 +283,7 @@ func parseStatsigCurves(home string) (json.RawMessage, error) {
 			depth--
 			if depth == 0 {
 				rawText := home[start : i+1]
-				if escaped {
+				if escapedMode {
 					rawText = strings.ReplaceAll(rawText, `\"`, `"`)
 				}
 				raw := json.RawMessage(rawText)
@@ -305,11 +305,11 @@ func fetchStatsigChunk(ctx context.Context, client *http.Client, base, path stri
 	if origin.Scheme != "https" && origin.Scheme != "http" {
 		return nil, errors.New("invalid chunk origin")
 	}
-	if !strings.HasPrefix(path, "/_next/static/chunks/") {
+	if !strings.HasPrefix(path, "/_next/static/chunks/") || strings.Contains(path, "..") {
 		return nil, errors.New("chunk path outside allowlist")
 	}
 	u := origin.ResolveReference(&url.URL{Path: path})
-	if u.Scheme != origin.Scheme || u.Host != origin.Host {
+	if u.Scheme != origin.Scheme || u.Host != origin.Host || u.User != nil || u.RawQuery != "" || !strings.HasPrefix(u.EscapedPath(), "/_next/static/chunks/") {
 		return nil, errors.New("cross-origin chunk")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
