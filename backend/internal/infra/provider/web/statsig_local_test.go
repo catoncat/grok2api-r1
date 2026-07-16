@@ -133,7 +133,7 @@ func TestStatsigRecentSignatureCapacityFailsClosed(t *testing.T) {
 	if claimed, current := signer.claimSignature("over-capacity", now, generation); claimed || !current {
 		t.Fatalf("over-capacity claimed=%t current=%t", claimed, current)
 	}
-	now = now.Add(statsigCacheTTL)
+	now = now.Add(statsigSignatureReplayTTL)
 	if claimed, current := signer.claimSignature("after-expiry", now, generation); !claimed || !current {
 		t.Fatalf("after-expiry claimed=%t current=%t", claimed, current)
 	}
