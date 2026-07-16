@@ -54,10 +54,7 @@ func (a *Adapter) config() Config {
 func (a *Adapter) ModelAliases() []provider.ModelAlias { return Aliases() }
 
 func (a *Adapter) QuotaMode(upstreamModel string) string {
-	if _, ok := Resolve(upstreamModel); ok {
-		return QuotaMode
-	}
-	return ""
+	return quotaModeForModel(upstreamModel)
 }
 
 func (a *Adapter) TierOrder(string) []account.WebTier { return nil }
@@ -82,22 +79,26 @@ func (a *Adapter) MarshalCredentials(values []provider.CredentialSeed) ([]byte, 
 
 func (a *Adapter) SyncQuota(_ context.Context, credential account.Credential) (provider.QuotaSnapshot, error) {
 	now := time.Now().UTC()
-	resetAt := now.Add(DefaultQuotaWindow * time.Second)
-	return provider.QuotaSnapshot{SyncedAt: now, Windows: []account.QuotaWindow{{
-		AccountID: credential.ID, Mode: QuotaMode, Remaining: DefaultQuotaLimit, Total: DefaultQuotaLimit,
-		WindowSeconds: DefaultQuotaWindow, ResetAt: &resetAt, SyncedAt: &now, Source: account.QuotaSourceDefault, UpdatedAt: now,
-	}}}, nil
+	windows := make([]account.QuotaWindow, 0, len(catalog))
+	for _, spec := range catalog {
+		windows = append(windows, newQuotaWindow(credential.ID, quotaModeForModel(spec.UpstreamModel), now))
+	}
+	return provider.QuotaSnapshot{SyncedAt: now, Windows: windows}, nil
 }
 
-func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credential, mode string) (account.QuotaWindow, error) {
-	if mode != QuotaMode {
+func (a *Adapter) SyncQuotaMode(_ context.Context, credential account.Credential, mode string) (account.QuotaWindow, error) {
+	if _, ok := resolveQuotaMode(mode); !ok {
 		return account.QuotaWindow{}, fmt.Errorf("不支持的 Console 额度模式 %q", mode)
 	}
-	snapshot, err := a.SyncQuota(ctx, credential)
-	if err != nil {
-		return account.QuotaWindow{}, err
+	return newQuotaWindow(credential.ID, mode, time.Now().UTC()), nil
+}
+
+func newQuotaWindow(accountID uint64, mode string, now time.Time) account.QuotaWindow {
+	resetAt := now.Add(DefaultQuotaWindow * time.Second)
+	return account.QuotaWindow{
+		AccountID: accountID, Mode: mode, Remaining: DefaultQuotaLimit, Total: DefaultQuotaLimit,
+		WindowSeconds: DefaultQuotaWindow, ResetAt: &resetAt, SyncedAt: &now, Source: account.QuotaSourceDefault, UpdatedAt: now,
 	}
-	return snapshot.Windows[0], nil
 }
 
 func (a *Adapter) ForwardResponse(ctx context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {

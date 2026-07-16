@@ -448,3 +448,25 @@ func TestSelectionErrorResponseDistinguishesCoolingAndSaturation(t *testing.T) {
 		})
 	}
 }
+
+func TestGatewayErrorsPropagateUpstreamRetryAfter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	failure := &gateway.UpstreamFailure{
+		HTTPStatus: http.StatusTooManyRequests, Code: "upstream_rate_limited",
+		PublicMessage: "上游请求频率受限", RetryAfter: 1500 * time.Millisecond,
+	}
+
+	openAIRecorder := httptest.NewRecorder()
+	openAIContext, _ := gin.CreateTestContext(openAIRecorder)
+	writeGatewayError(openAIContext, failure)
+	if openAIRecorder.Code != http.StatusTooManyRequests || openAIRecorder.Header().Get("Retry-After") != "2" {
+		t.Fatalf("OpenAI status=%d retry-after=%q", openAIRecorder.Code, openAIRecorder.Header().Get("Retry-After"))
+	}
+
+	anthropicRecorder := httptest.NewRecorder()
+	anthropicContext, _ := gin.CreateTestContext(anthropicRecorder)
+	writeGatewayAnthropicError(anthropicContext, failure)
+	if anthropicRecorder.Code != http.StatusTooManyRequests || anthropicRecorder.Header().Get("Retry-After") != "2" {
+		t.Fatalf("Anthropic status=%d retry-after=%q", anthropicRecorder.Code, anthropicRecorder.Header().Get("Retry-After"))
+	}
+}

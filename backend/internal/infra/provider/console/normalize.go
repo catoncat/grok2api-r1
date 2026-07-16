@@ -105,6 +105,7 @@ func mergeSearchTools(payload map[string]any) error {
 			return fmt.Errorf("Console tools 必须是数组")
 		}
 		for _, tool := range tools {
+			tool = normalizeSearchToolAlias(tool)
 			identity := toolIdentity(tool)
 			if index, exists := positions[identity]; identity != "" && exists {
 				result[index] = tool
@@ -119,8 +120,39 @@ func mergeSearchTools(payload map[string]any) error {
 	payload["tools"] = result
 	if _, exists := payload["tool_choice"]; !exists {
 		payload["tool_choice"] = "auto"
+	} else {
+		payload["tool_choice"] = normalizeSearchToolAlias(payload["tool_choice"])
 	}
 	return nil
+}
+
+func normalizeSearchToolAlias(value any) any {
+	tool, ok := value.(map[string]any)
+	if !ok {
+		if typeName, isString := value.(string); isString && isWebSearchAlias(typeName) {
+			return "web_search"
+		}
+		return value
+	}
+	typeName, _ := tool["type"].(string)
+	if !isWebSearchAlias(typeName) {
+		return value
+	}
+	result := make(map[string]any, len(tool))
+	for key, item := range tool {
+		result[key] = item
+	}
+	result["type"] = "web_search"
+	return result
+}
+
+func isWebSearchAlias(value string) bool {
+	switch value {
+	case "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26":
+		return true
+	default:
+		return false
+	}
 }
 
 func toolIdentity(value any) string {

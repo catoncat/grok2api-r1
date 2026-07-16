@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	QuotaMode          = "console"
+	quotaModePrefix    = "console:"
 	DefaultQuotaLimit  = 20
 	DefaultQuotaWindow = 3600
 )
@@ -71,6 +71,22 @@ func Routes() []modeldomain.Route {
 func Resolve(upstreamModel string) (ModelSpec, bool) {
 	for _, spec := range catalog {
 		if spec.UpstreamModel == upstreamModel {
+			return spec, true
+		}
+	}
+	return ModelSpec{}, false
+}
+
+func quotaModeForModel(upstreamModel string) string {
+	if spec, ok := Resolve(upstreamModel); ok {
+		return quotaModePrefix + spec.UpstreamModel
+	}
+	return ""
+}
+
+func resolveQuotaMode(mode string) (ModelSpec, bool) {
+	for _, spec := range catalog {
+		if quotaModeForModel(spec.UpstreamModel) == mode {
 			return spec, true
 		}
 	}
