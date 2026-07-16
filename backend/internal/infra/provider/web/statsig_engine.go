@@ -4,6 +4,7 @@ package web
 // build-agnostic: discovery verifies runtime behaviour rather than build IDs.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -30,11 +31,14 @@ import (
 var statsigShim string
 
 const (
-	statsigChunkLimit = 256
-	statsigChunkBytes = 2 << 20
-	statsigTotalBytes = 32 << 20
-	statsigWorkers    = 8
-	statsigRuntimeMax = 4
+	statsigChunkLimit        = 256
+	statsigChunkBytes        = 2 << 20
+	statsigTotalBytes        = 32 << 20
+	statsigWorkers           = 8
+	statsigRuntimeMax        = 4
+	statsigCurvesBytes       = 64 << 10
+	statsigCurveGroupsMax    = 64
+	statsigCurvesPerGroupMax = 64
 )
 
 var (
@@ -248,53 +252,113 @@ func statsigChunkPaths(source string, seen map[string]bool) []string {
 	return out
 }
 
-// parseStatsigCurves retains the page's JSON representation. The signer itself
-// chooses how to interpret these values; we only supply its current DOM input.
+type statsigCurve struct {
+	Color  []int `json:"color"`
+	Deg    int   `json:"deg"`
+	Bezier []int `json:"bezier"`
+}
+
+// parseStatsigCurves accepts both plain JSON and the JSON-string escaping used
+// by React Server Component flight payloads. Only the bounded curve schema is
+// allowed through to the JavaScript runtime.
 func parseStatsigCurves(home string) (json.RawMessage, error) {
-	start := strings.Index(home, "[[{\"color\"")
-	escapedMode := false
-	if start < 0 {
-		start, escapedMode = strings.Index(home, `[[{\"color\"`), true
+	const directPrefix = `[[{"color"`
+	const escapedPrefix = `[[{\"color\"`
+	directStart := strings.Index(home, directPrefix)
+	escapedStart := strings.Index(home, escapedPrefix)
+	start, escapedMode := directStart, false
+	if start < 0 || (escapedStart >= 0 && escapedStart < start) {
+		start, escapedMode = escapedStart, true
 	}
 	if start < 0 {
 		return nil, errors.New("Statsig curves not found")
 	}
+	raw, err := extractStatsigCurvesValue(home[start:], escapedMode)
+	if err != nil {
+		return nil, err
+	}
+	return validateStatsigCurves(raw)
+}
+
+func extractStatsigCurvesValue(source string, escapedMode bool) ([]byte, error) {
+	limit := len(source)
+	if limit > statsigCurvesBytes+1 {
+		limit = statsigCurvesBytes + 1
+	}
 	depth, quoted, escaped := 0, false, false
-	for i := start; i < len(home); i++ {
-		c := home[i]
-		if quoted {
-			if escaped {
-				escaped = false
-			} else if c == '\\' {
-				escaped = true
-			} else if c == '"' {
-				quoted = false
+	for i := 0; i < limit; i++ {
+		c := source[i]
+		if !escapedMode {
+			if quoted {
+				if escaped {
+					escaped = false
+				} else if c == '\\' {
+					escaped = true
+				} else if c == '"' {
+					quoted = false
+				}
+				continue
 			}
-			continue
-		}
-		if c == '"' {
-			quoted = true
-			continue
+			if c == '"' {
+				quoted = true
+				continue
+			}
 		}
 		if c == '[' {
 			depth++
-		}
-		if c == ']' {
+		} else if c == ']' {
 			depth--
 			if depth == 0 {
-				rawText := home[start : i+1]
+				if i+1 > statsigCurvesBytes {
+					return nil, errors.New("Statsig curves exceed limit")
+				}
+				rawText := source[:i+1]
 				if escapedMode {
-					rawText = strings.ReplaceAll(rawText, `\"`, `"`)
+					encoded := make([]byte, len(rawText)+2)
+					encoded[0], encoded[len(encoded)-1] = '"', '"'
+					copy(encoded[1:], rawText)
+					if err := json.Unmarshal(encoded, &rawText); err != nil {
+						return nil, errors.New("invalid escaped Statsig curves")
+					}
 				}
-				raw := json.RawMessage(rawText)
-				if !json.Valid(raw) {
-					return nil, errors.New("invalid Statsig curves")
-				}
-				return raw, nil
+				return []byte(rawText), nil
 			}
 		}
 	}
+	if len(source) > statsigCurvesBytes {
+		return nil, errors.New("Statsig curves exceed limit")
+	}
 	return nil, errors.New("Statsig curves incomplete")
+}
+
+func validateStatsigCurves(raw []byte) (json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var groups [][]statsigCurve
+	if err := decoder.Decode(&groups); err != nil {
+		return nil, errors.New("invalid Statsig curves")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, errors.New("invalid trailing Statsig curves data")
+	}
+	if len(groups) == 0 || len(groups) > statsigCurveGroupsMax {
+		return nil, errors.New("invalid Statsig curve group count")
+	}
+	for _, group := range groups {
+		if len(group) == 0 || len(group) > statsigCurvesPerGroupMax {
+			return nil, errors.New("invalid Statsig curves per group")
+		}
+		for _, curve := range group {
+			if len(curve.Color) != 6 || len(curve.Bezier) != 4 {
+				return nil, errors.New("invalid Statsig curve shape")
+			}
+		}
+	}
+	canonical, err := json.Marshal(groups)
+	if err != nil {
+		return nil, errors.New("invalid Statsig curves")
+	}
+	return json.RawMessage(canonical), nil
 }
 
 func fetchStatsigChunk(ctx context.Context, client *http.Client, base, path string, limit int) ([]byte, error) {
