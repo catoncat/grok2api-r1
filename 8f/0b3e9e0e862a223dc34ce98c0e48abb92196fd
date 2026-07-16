@@ -1,0 +1,60 @@
+backend/internal/infra/provider/console/catalog.go
+  s_54653f60ac62a9::t_bbc4d49a58189a 10,80-89,92,94
+  s_54653f60ac62a9::t_0abc19fa468140 90-91
+  s_54653f60ac62a9::t_00e8acec033800 93
+  s_54653f60ac62a9::t_05d8cf726a9856 95
+backend/internal/infra/provider/console/adapter.go
+  s_54653f60ac62a9::t_bbc4d49a58189a 57,82-86,89-90,93-100
+backend/internal/transport/http/inference/handler_test.go
+  s_54653f60ac62a9::t_b98acd3c733fed 451-472
+backend/internal/infra/provider/console/console_test.go
+  s_54653f60ac62a9::t_202c5b53fbbfe2 71-110
+  s_54653f60ac62a9::t_979038be7fe343 153-180
+backend/internal/application/gateway/service_test.go
+  s_54653f60ac62a9::t_340f272c8ef22a 163,178-182,184-185,211,218,224-225,227-228,231-233,235-237,239-241
+  s_54653f60ac62a9::t_b98acd3c733fed 860,863-867
+  s_54653f60ac62a9::t_fe93cb08db886b 1251-1260,1289-1294,1299,1310-1330
+  s_54653f60ac62a9::t_b829fe4359e5f1 881,883
+  s_54653f60ac62a9::t_67326d644bdab6 808-859,861-862,874-880,882,884-897,900,905-913
+  s_54653f60ac62a9::t_61136ed58eb4f6 868-873,898-899,901-904
+  s_54653f60ac62a9::t_52d123e7d19b83 28
+  s_d0b43cfc11c2cf::t_83e21882fa69d9 1331
+README.md
+  s_54653f60ac62a9::t_979038be7fe343 154-172,174-176,196,198-205
+  s_54653f60ac62a9::t_b98acd3c733fed 173
+backend/internal/infra/provider/console/normalize.go
+  s_54653f60ac62a9::t_979038be7fe343 108,123-124,129-156
+  s_54653f60ac62a9::t_770b5da13c4887 157
+backend/internal/transport/http/inference/handler.go
+  s_54653f60ac62a9::t_b98acd3c733fed 1048,1075,1110,1114-1119
+  s_54653f60ac62a9::t_8def94e28298e8 1120-1121
+backend/internal/application/gateway/service.go
+  s_54653f60ac62a9::t_b98acd3c733fed 589-591
+  s_54653f60ac62a9::t_ba322965d64db8 112,131-135,140-156,159-160,163-169,181,186-188,194-199,203-206,209
+  s_54653f60ac62a9::t_ff360e2cc798d6 477-488
+  s_54653f60ac62a9::t_821ac6aa1de3a4 593,596,599-600
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "8f0b3e9e0e862a223dc34ce98c0e48abb92196fd",
+  "prompts": {},
+  "sessions": {
+    "s_54653f60ac62a9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a96-6b17-7360-ae10-e0d870c833f3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_d0b43cfc11c2cf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6b7a-3c3b-7a22-9573-0ba5f104eb4c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
