@@ -14,12 +14,41 @@ import (
 	"time"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
+	egressdomain "github.com/chenyme/grok2api/backend/internal/domain/egress"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 )
 
 const capturedWeeklyCreditsHex = "00000000630a610d0000304112001a00220c089abbccd2061080f2d1fc012a0c089ab0f1d2061080f2d1fc013a07080515000020413a070804150000803f3a020802421e0802120c089abbccd2061080f2d1fc011a0c089ab0f1d2061080f2d1fc01580162006801800000000f677270632d7374617475733a300d0a"
+
+func TestSyncQuotaModeCode7RetriesWithoutEgressFeedback(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte(`{"error":{"message":"signature rejected","code":7}}`))
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 10, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	_, err = adapter.SyncQuotaMode(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token}, "fast")
+	if err == nil || calls.Load() != 2 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
+	}
+}
 
 func TestParseCapturedWeeklyCreditsResponse(t *testing.T) {
 	body, err := hex.DecodeString(capturedWeeklyCreditsHex)

@@ -310,6 +310,15 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(upstream.Body, 1<<20))
 			_ = upstream.Body.Close()
+			responseErr := webResponseErrorFromBody(body)
+			if errors.Is(responseErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget) {
+					lease.Release()
+					continue
+				}
+				lease.Release()
+				return "", &liteUpstreamError{StatusCode: upstream.StatusCode, Status: upstream.Status, Body: body}
+			}
 			if upstream.StatusCode == http.StatusForbidden {
 				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
 					lease.Release()
@@ -343,6 +352,14 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 				return "", &liteUpstreamError{StatusCode: http.StatusTooManyRequests, Status: "429 Too Many Requests", Body: body}
 			}
 			status := 0
+			if errors.Is(consumeErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget) {
+					lease.Release()
+					continue
+				}
+				lease.Release()
+				return "", consumeErr
+			}
 			if errors.Is(consumeErr, errWebAntiBot) {
 				status = http.StatusForbidden
 				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
@@ -942,6 +959,19 @@ func (a *Adapter) postSignedJSON(ctx context.Context, cfg Config, lease *egress.
 		if err != nil {
 			cancel()
 			return nil, err
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			body, responseErr := peekWebResponseError(response.Body, 1<<20)
+			response.Body = body
+			if errors.Is(responseErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(endpoint) {
+					_ = response.Body.Close()
+					cancel()
+					continue
+				}
+				response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
+				return response, nil
+			}
 		}
 		if response.StatusCode == http.StatusForbidden {
 			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {

@@ -12,7 +12,10 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	egressdomain "github.com/chenyme/grok2api/backend/internal/domain/egress"
@@ -269,6 +272,52 @@ func (egressRepositoryStub) DeleteEgressNode(context.Context, uint64) error {
 
 type fixedEgressRepositoryStub struct{ nodes []egressdomain.Node }
 
+type trackingEgressRepository struct {
+	mu      sync.Mutex
+	node    egressdomain.Node
+	updates int
+}
+
+func (s *trackingEgressRepository) ListEgressNodes(_ context.Context, scope egressdomain.Scope, _ repository.SortQuery) ([]egressdomain.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.node.Scope != scope {
+		return nil, nil
+	}
+	return []egressdomain.Node{s.node}, nil
+}
+
+func (s *trackingEgressRepository) GetEgressNode(_ context.Context, id uint64) (egressdomain.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.node.ID != id {
+		return egressdomain.Node{}, errors.New("not found")
+	}
+	return s.node, nil
+}
+
+func (s *trackingEgressRepository) CreateEgressNode(context.Context, egressdomain.Node) (egressdomain.Node, error) {
+	return egressdomain.Node{}, errors.New("unsupported")
+}
+
+func (s *trackingEgressRepository) UpdateEgressNode(_ context.Context, node egressdomain.Node) (egressdomain.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.node = node
+	s.updates++
+	return node, nil
+}
+
+func (s *trackingEgressRepository) DeleteEgressNode(context.Context, uint64) error {
+	return errors.New("unsupported")
+}
+
+func (s *trackingEgressRepository) snapshot() (egressdomain.Node, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.node, s.updates
+}
+
 func (s fixedEgressRepositoryStub) ListEgressNodes(_ context.Context, scope egressdomain.Scope, _ repository.SortQuery) ([]egressdomain.Node, error) {
 	values := make([]egressdomain.Node, 0, len(s.nodes))
 	for _, node := range s.nodes {
@@ -487,9 +536,117 @@ func TestPreflightRejectsInBandErrorBeforeStreaming(t *testing.T) {
 }
 
 func TestPreflightClassifiesAntiBotRejection(t *testing.T) {
-	source := io.NopCloser(strings.NewReader(`{"error":{"message":"Request rejected by anti-bot rules.","code":7,"details":[]}}` + "\n"))
+	source := io.NopCloser(strings.NewReader(`{"error":{"message":"Request rejected by anti-bot rules.","details":[]}}` + "\n"))
 	if _, err := preflightUpstream(source); !errors.Is(err, errWebAntiBot) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPreflightClassifiesCode7WithoutPoisoningAntiBotSignal(t *testing.T) {
+	source := io.NopCloser(strings.NewReader(`{"error":{"message":"signature rejected","code":7}}` + "\n"))
+	if _, err := preflightUpstream(source); !errors.Is(err, errWebCode7) || errors.Is(err, errWebAntiBot) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLiteCode7RetriesWithoutEgressFeedback(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(writer, `{"error":{"message":"signature rejected","code":7}}`)
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 7, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	_, err = adapter.generateLiteImageURL(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token}, ModelSpec{Mode: "fast"}, "draw")
+	if err == nil || calls.Load() != 2 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestLiteAntiBotStillFeedsEgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(writer, `{"error":{"message":"Request rejected by anti-bot rules."}}`)
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 8, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	for range 2 {
+		_, _ = adapter.generateLiteImageURL(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token}, ModelSpec{Mode: "fast"}, "draw")
+	}
+	node, updates := repository.snapshot()
+	if updates != 2 || node.Health >= 1 || node.FailureCount != 2 || node.LastError != "anti-bot rejection" {
+		t.Fatalf("anti-bot feedback node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestPostSignedJSONCode7RetriesWithoutEgressFeedback(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(writer, `{"error":{"message":"signature rejected","code":7}}`)
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 9, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	manager := infraegress.NewManager(repository, cipher)
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, manager, cipher, nil, nil)
+	lease, err := manager.Acquire(context.Background(), egressdomain.ScopeWeb, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	response, err := adapter.postSignedJSON(context.Background(), adapter.config(), lease, "test-sso", server.URL+"/post", map[string]string{"x": "y"}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, readErr := io.ReadAll(response.Body)
+	if readErr != nil || response.StatusCode != http.StatusForbidden || calls.Load() != 2 || !bytes.Contains(body, []byte(`"code":7`)) {
+		t.Fatalf("status=%d calls=%d body=%q err=%v", response.StatusCode, calls.Load(), body, readErr)
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestPeekWebResponseErrorReplaysLongBody(t *testing.T) {
+	prefix := `{"error":{"message":"signature rejected","code":7}}`
+	body := prefix + strings.Repeat("x", 2<<20)
+	replayed, err := peekWebResponseError(io.NopCloser(strings.NewReader(body)), int64(len(prefix)))
+	if !errors.Is(err, errWebCode7) {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := io.ReadAll(replayed)
+	if readErr != nil || string(got) != body {
+		t.Fatalf("replayed len=%d want=%d err=%v", len(got), len(body), readErr)
 	}
 }
 
