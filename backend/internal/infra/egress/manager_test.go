@@ -67,6 +67,25 @@ func TestAffinitySelectionExcludesNodesBelowFleetFloor(t *testing.T) {
 	}
 }
 
+func TestAffinitySelectionIncludesFleetFloorBoundary(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := []domain.Node{
+		{ID: 1, Health: 1},
+		{ID: 2, Health: affinityHealthFloor},
+	}
+	seen := make(map[uint64]bool)
+	for accountID := 1; accountID <= 1000; accountID++ {
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("fleet-floor boundary returned no node")
+		}
+		seen[selected.ID] = true
+	}
+	if !seen[2] {
+		t.Fatal("node at the fleet health floor never re-entered affinity selection")
+	}
+}
+
 func TestAffinitySelectionExcludesConfirmedAntiBotBeforeFleetSync(t *testing.T) {
 	manager := NewManager(nil, nil)
 	nodes := []domain.Node{
@@ -424,6 +443,25 @@ func TestWebAssetFallsBackToWeb(t *testing.T) {
 	}
 	if lease.client != webLease.client {
 		t.Fatal("Web Asset fallback did not reuse the matching Web browser session")
+	}
+}
+
+func TestWebAssetFallsBackWhenAssetNodesAreConfirmedAntiBot(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{
+		{ID: 1, Name: "asset", Scope: domain.ScopeWebAsset, Enabled: true, Health: 1, LastError: "anti-bot rejection"},
+		{ID: 2, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1},
+	}}, cipher)
+	lease, err := manager.Acquire(context.Background(), domain.ScopeWebAsset, "account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if lease.NodeID != 2 {
+		t.Fatalf("node = %d, want safe web fallback node 2", lease.NodeID)
 	}
 }
 

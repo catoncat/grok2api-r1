@@ -100,7 +100,8 @@ func (m *Manager) AcquireIfConfigured(ctx context.Context, scope domain.Scope, a
 func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity string, allowDirect bool) (*Lease, bool, error) {
 	now := time.Now().UTC()
 	configured := false
-	var available []domain.Node
+	var selected domain.Node
+	selectedOK := false
 	for _, candidateScope := range fallbackScopes(scope) {
 		nodes, err := m.listNodes(ctx, candidateScope, now)
 		if err != nil {
@@ -113,12 +114,12 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 				candidateAvailable = append(candidateAvailable, node)
 			}
 		}
-		if len(candidateAvailable) > 0 {
-			available = candidateAvailable
+		sort.SliceStable(candidateAvailable, func(i, j int) bool { return candidateAvailable[i].ID < candidateAvailable[j].ID })
+		if selected, selectedOK = m.selectNode(candidateAvailable, affinity); selectedOK {
 			break
 		}
 	}
-	if len(available) == 0 {
+	if !selectedOK {
 		if configured {
 			return nil, false, fmt.Errorf("当前没有可用的 %s 出口节点", scope)
 		}
@@ -126,12 +127,7 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 			recordSelection(ctx, Selection{NodeName: "direct", Scope: scope})
 			return nil, false, nil
 		}
-		available = []domain.Node{{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}}
-	}
-	sort.SliceStable(available, func(i, j int) bool { return available[i].ID < available[j].ID })
-	selected, ok := m.selectNode(available, affinity)
-	if !ok {
-		return nil, false, fmt.Errorf("当前没有可用的 %s 出口节点", scope)
+		selected = domain.Node{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}
 	}
 	proxyURL, err := m.cipher.Decrypt(selected.EncryptedProxyURL)
 	if err != nil {
