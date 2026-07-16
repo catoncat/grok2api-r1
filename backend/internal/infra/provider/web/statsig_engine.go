@@ -313,7 +313,9 @@ func discoverStatsigEngineWithLimits(ctx context.Context, base, home, seed, curv
 	// Static chunks stay direct and credential-free: discovery must not spend
 	// residential bytes or expose account/CF session state. Failure falls back
 	// to the configured remote signer.
-	client := &http.Client{Timeout: requestTimeout, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	transport := &http.Transport{Proxy: nil, IdleConnTimeout: 5 * time.Second}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Timeout: requestTimeout, Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	seen := make(map[string]bool, min(len(paths), limits.ChunkLimit))
 	queue := make([]string, 0, min(len(paths), limits.ChunkLimit))
 	for _, path := range paths {
