@@ -22,7 +22,10 @@ import (
 )
 
 const DefaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-const nodeSnapshotTTL = time.Second
+const (
+	nodeSnapshotTTL     = time.Second
+	affinityHealthFloor = 0.5
+)
 
 type Lease struct {
 	NodeID    uint64
@@ -220,7 +223,7 @@ func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
 	if affinity != "" {
 		candidates := make([]domain.Node, 0, len(nodes))
 		for _, node := range nodes {
-			if node.Health >= 0.8 {
+			if node.Health >= affinityHealthFloor {
 				candidates = append(candidates, node)
 			}
 		}

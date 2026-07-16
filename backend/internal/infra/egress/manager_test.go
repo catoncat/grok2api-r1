@@ -16,7 +16,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/repository"
 )
 
-func TestAffinitySelectionSpreadsAcrossHealthyNodes(t *testing.T) {
+func TestAffinitySelectionKeepsRecoverableNodesInMixedFleet(t *testing.T) {
 	manager := NewManager(nil, nil)
 	nodes := make([]domain.Node, 15)
 	for index := range nodes {
@@ -28,21 +28,43 @@ func TestAffinitySelectionSpreadsAcrossHealthyNodes(t *testing.T) {
 	counts := make(map[uint64]int)
 	for accountID := 1; accountID <= 10000; accountID++ {
 		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
-		if selected.Health < 0.8 {
-			t.Fatalf("selected unhealthy node %d", selected.ID)
+		if selected.Health < affinityHealthFloor {
+			t.Fatalf("selected node below fleet floor %d", selected.ID)
+		}
+		counts[selected.ID]++
+	}
+	if len(counts) != len(nodes) {
+		t.Fatalf("selected ready nodes=%d, want %d", len(counts), len(nodes))
+	}
+}
+
+func TestAffinitySelectionExcludesNodesBelowFleetFloor(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 1}
+	}
+	for index := 0; index < 8; index++ {
+		nodes[index].Health = affinityHealthFloor - 0.01
+	}
+	counts := make(map[uint64]int)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if selected.Health < affinityHealthFloor {
+			t.Fatalf("selected node below fleet floor %d", selected.ID)
 		}
 		counts[selected.ID]++
 	}
 	if len(counts) != 7 {
-		t.Fatalf("selected healthy nodes=%d, want 7", len(counts))
+		t.Fatalf("selected ready nodes=%d, want 7", len(counts))
 	}
 }
 
-func TestAffinitySelectionDoesNotCollapseWhenAllNodesAreDegraded(t *testing.T) {
+func TestAffinitySelectionDoesNotCollapseWhenEveryNodeIsBelowFleetFloor(t *testing.T) {
 	manager := NewManager(nil, nil)
 	nodes := make([]domain.Node, 15)
 	for index := range nodes {
-		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 0.7}
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: affinityHealthFloor - 0.01}
 	}
 	counts := make(map[uint64]int)
 	for accountID := 1; accountID <= 10000; accountID++ {
@@ -50,7 +72,7 @@ func TestAffinitySelectionDoesNotCollapseWhenAllNodesAreDegraded(t *testing.T) {
 		counts[selected.ID]++
 	}
 	if len(counts) != len(nodes) {
-		t.Fatalf("selected degraded nodes=%d, want %d", len(counts), len(nodes))
+		t.Fatalf("selected fallback nodes=%d, want %d", len(counts), len(nodes))
 	}
 }
 
