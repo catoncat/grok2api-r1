@@ -223,7 +223,7 @@ func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
 	if affinity != "" {
 		candidates := make([]domain.Node, 0, len(nodes))
 		for _, node := range nodes {
-			if node.Health >= affinityHealthFloor {
+			if node.Health >= affinityHealthFloor && !strings.Contains(strings.ToLower(node.LastError), "anti-bot") {
 				candidates = append(candidates, node)
 			}
 		}

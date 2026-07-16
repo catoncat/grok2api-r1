@@ -60,6 +60,20 @@ func TestAffinitySelectionExcludesNodesBelowFleetFloor(t *testing.T) {
 	}
 }
 
+func TestAffinitySelectionExcludesConfirmedAntiBotBeforeFleetSync(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := []domain.Node{
+		{ID: 1, Health: 1},
+		{ID: 2, Health: 0.7, LastError: "anti-bot rejection"},
+	}
+	for accountID := 1; accountID <= 1000; accountID++ {
+		selected := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if selected.ID != 1 {
+			t.Fatalf("selected confirmed anti-bot node %d", selected.ID)
+		}
+	}
+}
+
 func TestAffinitySelectionDoesNotCollapseWhenEveryNodeIsBelowFleetFloor(t *testing.T) {
 	manager := NewManager(nil, nil)
 	nodes := make([]domain.Node, 15)
