@@ -108,6 +108,42 @@ func TestStatsigDiscoveryEnforcesDeadlineAndByteBudget(t *testing.T) {
 	})
 }
 
+func TestStatsigDiscoveryDeadlineIncludesCandidateVerification(t *testing.T) {
+	seed, decoded := testStatsigSeed()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`String.fromCharCode; "".charCodeAt; for (;;) {}`))
+	}))
+	defer server.Close()
+
+	home := `/_next/static/chunks/a.js /_next/static/chunks/b.js`
+	limits := statsigDiscoveryLimits{ChunkLimit: 2, ChunkBytes: 8 << 10, TotalBytes: 16 << 10, Workers: 2, Timeout: 50 * time.Millisecond}
+	started := time.Now()
+	_, attempts, _, err := discoverStatsigEngineWithLimits(context.Background(), server.URL, home, seed, `[]`, decoded, limits)
+	elapsed := time.Since(started)
+	if err == nil || attempts != 2 || elapsed > 500*time.Millisecond {
+		t.Fatalf("attempts=%d elapsed=%s err=%v", attempts, elapsed, err)
+	}
+}
+
+func TestNewStatsigRuntimeContainsInvalidNativeLengthPanic(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("native panic escaped runtime bootstrap: %v", recovered)
+		}
+	}()
+	_, err := newStatsigRuntime(`__goSha256({length: -1});`)
+	if err == nil {
+		t.Fatal("runtime accepted a throwing native byte source")
+	}
+}
+
+func TestNewStatsigRuntimeRejectsOversizedNativeByteSource(t *testing.T) {
+	_, err := newStatsigRuntime(`__goSha256({length: 1048577});`)
+	if err == nil || !strings.Contains(err.Error(), "byte source exceeds limit") {
+		t.Fatalf("oversized byte source err=%v", err)
+	}
+}
+
 func TestStatsigBuildCacheIsOriginScopedBoundedAndExpiring(t *testing.T) {
 	statsigBuildMu.Lock()
 	original := statsigBuilds

@@ -43,6 +43,7 @@ const (
 	statsigLocalRetryDelay   = time.Millisecond
 	statsigDiscoveryTimeout  = 20 * time.Second
 	statsigSignerSourceBytes = 256 << 10
+	statsigJSBytesMax        = 1 << 20
 	statsigBuildTTL          = statsigCacheTTL
 	statsigBuildMaxEntries   = 16
 )
@@ -309,6 +310,9 @@ func discoverStatsigEngineWithLimits(ctx context.Context, base, home, seed, curv
 	discoveryCtx, cancel := context.WithTimeout(ctx, limits.Timeout)
 	defer cancel()
 	requestTimeout := min(12*time.Second, limits.Timeout)
+	// Static chunks stay direct and credential-free: discovery must not spend
+	// residential bytes or expose account/CF session state. Failure falls back
+	// to the configured remote signer.
 	client := &http.Client{Timeout: requestTimeout, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	seen := make(map[string]bool, min(len(paths), limits.ChunkLimit))
 	queue := make([]string, 0, min(len(paths), limits.ChunkLimit))
@@ -344,6 +348,9 @@ func discoverStatsigEngineWithLimits(ctx context.Context, base, home, seed, curv
 			total += result.bytes
 			if result.err != nil {
 				continue
+			}
+			if discoveryCtx.Err() != nil {
+				break
 			}
 			if engine, ok := verifyStatsigChunk(discoveryCtx, string(result.body), seed, curves, decoded); ok {
 				cancel()
@@ -517,14 +524,14 @@ func fetchStatsigChunkMeasured(ctx context.Context, client *http.Client, base, p
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+	if resp.ContentLength > int64(limit) {
+		return nil, 0, errors.New("chunk exceeds limit")
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)))
 	if err != nil {
-		return nil, min(len(body), limit), err
+		return nil, len(body), err
 	}
-	bytesRead := min(len(body), limit)
-	if len(body) > limit {
-		return nil, bytesRead, errors.New("chunk exceeds limit")
-	}
+	bytesRead := len(body)
 	if resp.StatusCode != http.StatusOK {
 		return nil, bytesRead, fmt.Errorf("chunk returned %d", resp.StatusCode)
 	}
@@ -554,20 +561,29 @@ func statsigEmbedsSeed(id string, seed []byte) bool {
 }
 
 func (e *statsigEngine) signID(ctx context.Context, seed, curves, method, path string) (id string, err error) {
-	rt, err := e.borrow(ctx)
+	var rt *statsigRuntime
+	good := false
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			id = ""
+			err = fmt.Errorf("Statsig runtime panic: %v", recovered)
+			good = false
+		}
+		if rt == nil {
+			return
+		}
+		if good {
+			e.pool <- rt
+			return
+		}
+		e.mu.Lock()
+		e.created--
+		e.mu.Unlock()
+	}()
+	rt, err = e.borrow(ctx)
 	if err != nil {
 		return "", err
 	}
-	good := false
-	defer func() {
-		if good {
-			e.pool <- rt
-		} else {
-			e.mu.Lock()
-			e.created--
-			e.mu.Unlock()
-		}
-	}()
 	if err = rt.rt.Set("__SEED", seed); err == nil {
 		err = rt.rt.Set("__CURVES", curves)
 	}
@@ -580,19 +596,12 @@ func (e *statsigEngine) signID(ctx context.Context, seed, curves, method, path s
 	if err != nil {
 		return "", err
 	}
-	limit := 3 * time.Second
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < limit {
-		limit = time.Until(deadline)
+	limit, err := statsigExecutionLimit(ctx, 3*time.Second)
+	if err != nil {
+		return "", err
 	}
-	timer := time.AfterFunc(limit, func() { rt.rt.Interrupt("statsig deadline") })
-	defer timer.Stop()
-	defer rt.rt.ClearInterrupt()
-	defer func() {
-		if recover() != nil {
-			id = ""
-			err = errors.New("Statsig runtime panic")
-		}
-	}()
+	timer, interruptDone := statsigInterruptAfter(rt.rt, limit, "statsig deadline")
+	defer stopStatsigInterrupt(timer, interruptDone, rt.rt)
 	if _, err = rt.sign(goja.Undefined()); err != nil {
 		return "", err
 	}
@@ -621,7 +630,7 @@ func (e *statsigEngine) borrow(ctx context.Context) (*statsigRuntime, error) {
 	if e.created < statsigRuntimeMax {
 		e.created++
 		e.mu.Unlock()
-		rt, err := newStatsigRuntime(e.source)
+		rt, err := newStatsigRuntimeContext(ctx, e.source)
 		if err != nil {
 			e.mu.Lock()
 			e.created--
@@ -639,12 +648,31 @@ func (e *statsigEngine) borrow(ctx context.Context) (*statsigRuntime, error) {
 }
 
 func newStatsigRuntime(source string) (*statsigRuntime, error) {
+	return newStatsigRuntimeContext(context.Background(), source)
+}
+
+func newStatsigRuntimeContext(ctx context.Context, source string) (runtime *statsigRuntime, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			runtime = nil
+			err = fmt.Errorf("Statsig runtime bootstrap panic: %v", recovered)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	rt := goja.New()
-	timer := time.AfterFunc(3*time.Second, func() { rt.Interrupt("statsig bootstrap deadline") })
-	defer timer.Stop()
-	defer rt.ClearInterrupt()
+	limit, err := statsigExecutionLimit(ctx, 3*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	timer, interruptDone := statsigInterruptAfter(rt, limit, "statsig bootstrap deadline")
+	defer stopStatsigInterrupt(timer, interruptDone, rt)
 	if err := rt.Set("__goSha256", func(call goja.FunctionCall) goja.Value {
-		data := statsigJSBytes(rt, call.Argument(0))
+		data, byteErr := statsigJSBytes(rt, call.Argument(0))
+		if byteErr != nil {
+			panic(rt.NewTypeError(byteErr.Error()))
+		}
 		sum := sha256.Sum256(data)
 		return rt.ToValue(rt.NewArrayBuffer(sum[:]))
 	}); err != nil {
@@ -666,15 +694,54 @@ func newStatsigRuntime(source string) (*statsigRuntime, error) {
 	return &statsigRuntime{rt: rt, sign: sign}, nil
 }
 
-func statsigJSBytes(rt *goja.Runtime, value goja.Value) []byte {
+func statsigExecutionLimit(ctx context.Context, maximum time.Duration) (time.Duration, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0, context.DeadlineExceeded
+		}
+		if remaining < maximum {
+			maximum = remaining
+		}
+	}
+	return maximum, nil
+}
+
+func statsigInterruptAfter(rt *goja.Runtime, delay time.Duration, reason string) (*time.Timer, <-chan struct{}) {
+	done := make(chan struct{})
+	timer := time.AfterFunc(delay, func() {
+		defer close(done)
+		rt.Interrupt(reason)
+	})
+	return timer, done
+}
+
+func stopStatsigInterrupt(timer *time.Timer, done <-chan struct{}, rt *goja.Runtime) {
+	if !timer.Stop() {
+		<-done
+	}
+	rt.ClearInterrupt()
+}
+
+func statsigJSBytes(rt *goja.Runtime, value goja.Value) ([]byte, error) {
 	if buffer, ok := value.Export().(goja.ArrayBuffer); ok {
-		return buffer.Bytes()
+		if len(buffer.Bytes()) > statsigJSBytesMax {
+			return nil, errors.New("Statsig byte source exceeds limit")
+		}
+		return buffer.Bytes(), nil
 	}
 	o := value.ToObject(rt)
-	n := int(o.Get("length").ToInteger())
+	length := o.Get("length").ToInteger()
+	if length < 0 || length > statsigJSBytesMax {
+		return nil, errors.New("Statsig byte source exceeds limit")
+	}
+	n := int(length)
 	out := make([]byte, n)
 	for i := 0; i < n; i++ {
 		out[i] = byte(o.Get(strconv.Itoa(i)).ToInteger())
 	}
-	return out
+	return out, nil
 }
