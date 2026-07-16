@@ -708,8 +708,9 @@ func TestImageStreamExtensionEventsAndPayloads(t *testing.T) {
 	if err != nil || urlItem["url"] != "https://api.example/v1/media/images/img_test" || urlItem["mime_type"] != "image/jpeg" || urlItem["revised_prompt"] != "" {
 		t.Fatalf("url item = %#v, err=%v", urlItem, err)
 	}
-	b64Item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: "aW1hZ2U="}, "b64_json")
-	if err != nil || b64Item["b64_json"] != "aW1hZ2U=" || b64Item["mime_type"] != "image/jpeg" {
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	b64Item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: png}, "b64_json")
+	if err != nil || b64Item["b64_json"] != png || b64Item["mime_type"] != "image/png" {
 		t.Fatalf("base64 item = %#v, err=%v", b64Item, err)
 	}
 	var output bytes.Buffer
@@ -717,6 +718,22 @@ func TestImageStreamExtensionEventsAndPayloads(t *testing.T) {
 	value := output.String()
 	if !strings.Contains(value, "event: image_generation.failed") || !strings.Contains(value, `"id":"imggen_test"`) || !strings.Contains(value, `"code":"upstream_error"`) {
 		t.Fatalf("failure event = %q", value)
+	}
+}
+
+func TestImageDataItemBase64BypassesStorage(t *testing.T) {
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	store := &imageAssetStoreRetryStub{}
+	adapter := &Adapter{assets: store}
+	item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: png}, "b64_json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item["b64_json"] != png || item["mime_type"] != "image/png" {
+		t.Fatalf("base64 item = %#v", item)
+	}
+	if store.calls != 0 {
+		t.Fatalf("base64 output touched storage %d times", store.calls)
 	}
 }
 

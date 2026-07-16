@@ -185,15 +185,22 @@ func (s *Service) executeImage(
 		response, err = execute(ctx, route.Provider, credential, route.UpstreamModel)
 		if err != nil {
 			s.logger.Error("image_upstream_failed", "event_id", eventID, "request_id", requestID, "model", externalModel, "provider", route.Provider, "account_id", credential.ID, "error", err)
-			if !provider.IsMediaPostProcessingError(err) && !errors.Is(err, provider.ErrRequestSigning) {
+			mediaPostProcessingFailed := provider.IsMediaPostProcessingError(err)
+			if !mediaPostProcessingFailed && !errors.Is(err, provider.ErrRequestSigning) {
 				s.selector.MarkFailure(ctx, credential, 0, 0)
 			}
 			lease.Release()
 			errorCode := "upstream_unavailable"
-			if provider.IsMediaPostProcessingError(err) {
+			if mediaPostProcessingFailed {
 				errorCode = "media_postprocessing_failed"
 			}
 			writeFailureAudit(http.StatusBadGateway, errorCode, &credential)
+			if mediaPostProcessingFailed {
+				return nil, &UpstreamFailure{
+					HTTPStatus: http.StatusBadGateway, Code: errorCode,
+					PublicMessage: "图片已生成，但本地后处理失败", AccountID: credential.ID, AccountName: credential.Name, Cause: err,
+				}
+			}
 			return nil, err
 		}
 		if s.providers.RetryForbiddenAsEgress(credential.Provider) && response.StatusCode == http.StatusForbidden && attempt == 0 && attempt+1 < attempts {

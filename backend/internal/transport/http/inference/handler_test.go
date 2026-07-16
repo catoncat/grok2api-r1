@@ -103,6 +103,23 @@ func TestGatewayErrorDoesNotExposeInternalDetails(t *testing.T) {
 	}
 }
 
+func TestGatewayErrorClassifiesMediaPostProcessingWithoutInternalDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/", func(c *gin.Context) {
+		writeGatewayError(c, &gateway.UpstreamFailure{
+			HTTPStatus: http.StatusBadGateway, Code: "media_postprocessing_failed",
+			PublicMessage: "图片已生成，但本地后处理失败", Cause: errors.New("secret S3 451 response"),
+		})
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := recorder.Body.String()
+	if recorder.Code != http.StatusBadGateway || !strings.Contains(body, `"code":"media_postprocessing_failed"`) || !strings.Contains(body, "图片已生成") || strings.Contains(body, "S3") || strings.Contains(body, "451") {
+		t.Fatalf("status=%d body=%s", recorder.Code, body)
+	}
+}
+
 func TestGatewayErrorPreservesSanitizedUpstreamClassification(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	openAIRouter := gin.New()
