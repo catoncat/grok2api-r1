@@ -35,8 +35,9 @@ const (
 	statsigLocalMaxEntries  = 16
 	// A 2026-07-16 sample of the current signer saw no exact-ID recurrence beyond
 	// one second (2,000 calls, maximum 957ms). Keep twice that observed window.
-	statsigSignatureReplayTTL = 2 * time.Second
-	statsigRecentMaxEntries   = 128 << 10
+	statsigSignatureReplayTTL  = 2 * time.Second
+	statsigRecentMaxEntries    = 128 << 10
+	statsigReplayWarningWindow = 30 * time.Second
 )
 
 type statsigCacheEntry struct {
@@ -72,6 +73,8 @@ type statsigSigner struct {
 	entries          map[string]statsigCacheEntry
 	recentSignatures map[string]time.Time
 	recentOrder      []statsigSignatureEntry
+	replayEvictions  uint64
+	lastReplayWarn   time.Time
 	invalidations    map[string]time.Time
 	generation       uint64
 	refreshes        singleflight.Group
@@ -265,6 +268,7 @@ func (s *statsigSigner) claimSignature(value string, now time.Time, generation u
 			s.recentOrder = s.recentOrder[1:]
 			if seenAt, ok := s.recentSignatures[entry.value]; ok && seenAt.Equal(entry.seenAt) {
 				delete(s.recentSignatures, entry.value)
+				s.replayEvictions++
 				break
 			}
 		}
@@ -272,6 +276,21 @@ func (s *statsigSigner) claimSignature(value string, now time.Time, generation u
 	s.recentSignatures[value] = now
 	s.recentOrder = append(s.recentOrder, statsigSignatureEntry{value: value, seenAt: now})
 	return true, true
+}
+
+func (s *statsigSigner) replayEvictionWarning(now time.Time) (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.replayEvictions == 0 {
+		return 0, false
+	}
+	if !s.lastReplayWarn.IsZero() && now.Before(s.lastReplayWarn.Add(statsigReplayWarningWindow)) {
+		return 0, false
+	}
+	count := s.replayEvictions
+	s.replayEvictions = 0
+	s.lastReplayWarn = now
+	return count, true
 }
 
 func (s *statsigSigner) storeIfGeneration(key, value string, expiresAt, now time.Time, generation uint64) bool {
@@ -517,6 +536,14 @@ func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request,
 	}
 	signed, err := a.statsig.sign(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, request.Method, request.URL.String(), forceRemote)
 	if err == nil {
+		if count, warn := a.statsig.replayEvictionWarning(a.statsig.now().UTC()); warn {
+			a.log().Warn(
+				"web_statsig_replay_guard_evicted",
+				"count", count,
+				"capacity", statsigRecentMaxEntries,
+				"window_ms", statsigSignatureReplayTTL.Milliseconds(),
+			)
+		}
 		request.Header.Set("x-statsig-id", signed.value)
 		*request = *request.WithContext(context.WithValue(request.Context(), statsigGenerationContextKey{}, signed.generation))
 		if signed.source == "meta_refresh" {

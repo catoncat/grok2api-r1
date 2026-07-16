@@ -133,11 +133,20 @@ func TestStatsigRecentSignatureCapacityEvictsOnlyOldest(t *testing.T) {
 	if claimed, current := signer.claimSignature("over-capacity", now, generation); !claimed || !current {
 		t.Fatalf("over-capacity claimed=%t current=%t", claimed, current)
 	}
+	if count, warn := signer.replayEvictionWarning(now); !warn || count != 1 {
+		t.Fatalf("first eviction warning count=%d warn=%t", count, warn)
+	}
 	if claimed, current := signer.claimSignature("signature-0", now, generation); !claimed || !current {
 		t.Fatalf("oldest signature claimed=%t current=%t", claimed, current)
 	}
 	if claimed, current := signer.claimSignature("over-capacity", now, generation); claimed || !current {
 		t.Fatalf("recent signature claimed=%t current=%t", claimed, current)
+	}
+	if count, warn := signer.replayEvictionWarning(now); warn || count != 0 {
+		t.Fatalf("warning was not rate limited count=%d warn=%t", count, warn)
+	}
+	if count, warn := signer.replayEvictionWarning(now.Add(statsigReplayWarningWindow)); !warn || count != 1 {
+		t.Fatalf("aggregated eviction warning count=%d warn=%t", count, warn)
 	}
 	now = now.Add(statsigSignatureReplayTTL)
 	if claimed, current := signer.claimSignature("after-expiry", now, generation); !claimed || !current {
