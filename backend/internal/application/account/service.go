@@ -865,6 +865,7 @@ func (s *Service) syncWebCredentialsToConsole(ctx context.Context, values []acco
 		seed.Provider = accountdomain.ProviderConsole
 		seed.AuthType = accountdomain.AuthTypeSSO
 		seed.Name = webConsoleAccountName(value.Name, seed.Name)
+		seed.TeamID = value.TeamID
 		seeds = append(seeds, seed)
 	}
 	return s.persistImportedSeeds(ctx, seeds, observer, progress)
@@ -1635,6 +1636,16 @@ func (s *Service) HasBillingSnapshot(ctx context.Context, id uint64) (bool, erro
 
 func (s *Service) HasQuotaWindows(ctx context.Context, id uint64) (bool, error) {
 	return s.accounts.HasQuotaWindows(ctx, id)
+}
+
+// ObserveTeamID remembers team-scoped rate-limit identity learned from an
+// upstream response. It does not alter the account's stable import identity.
+func (s *Service) ObserveTeamID(ctx context.Context, id uint64, teamID string) error {
+	teamID = strings.TrimSpace(teamID)
+	if id == 0 || teamID == "" || len(teamID) > 255 {
+		return fmt.Errorf("上游 Team ID 无效")
+	}
+	return s.accounts.UpdateTeamID(ctx, id, teamID)
 }
 
 func (s *Service) DecrementQuota(ctx context.Context, id uint64, mode string, amount int) (bool, error) {

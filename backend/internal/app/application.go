@@ -191,6 +191,23 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		database.Close()
 		return nil, fmt.Errorf("校验 Provider 注册表: %w", err)
 	}
+	consoleQuotaModes := consoleprovider.QuotaModes()
+	migratedConsoleQuotaWindows, err := accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console", consoleQuotaModes)
+	if err == nil {
+		var aliases int64
+		aliases, err = accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console:grok-4.20-0309", []string{"console:grok-4.20-0309-reasoning"})
+		migratedConsoleQuotaWindows += aliases
+	}
+	if err != nil {
+		if runtimeStore != nil {
+			_ = runtimeStore.Close()
+		}
+		database.Close()
+		return nil, fmt.Errorf("迁移 Grok Console 模型额度窗口: %w", err)
+	}
+	if migratedConsoleQuotaWindows > 0 {
+		logger.Info("console_quota_windows_migrated", "legacy_windows", migratedConsoleQuotaWindows, "model_windows", len(consoleQuotaModes))
+	}
 	adminService := adminauth.NewService(adminRepo, sessionRepo, security.NewTokenService(cfg.Secrets.JWTSecret), cfg.Auth.AccessTokenTTL.Value(), cfg.Auth.RefreshTokenTTL.Value())
 	adminService.SetLoginRateLimiter(rateLimiter)
 	if err := adminService.Bootstrap(ctx, cfg.BootstrapAdmin.Username, cfg.BootstrapAdmin.Password); err != nil {

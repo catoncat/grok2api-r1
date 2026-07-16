@@ -76,8 +76,9 @@ func TestConsoleQuotaWindowsAreIsolatedByUpstreamModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	models := Catalog()
-	if len(snapshot.Windows) != len(models) {
-		t.Fatalf("quota windows = %d, want %d", len(snapshot.Windows), len(models))
+	quotaModes := QuotaModes()
+	if len(quotaModes) != 5 || len(snapshot.Windows) != len(quotaModes) {
+		t.Fatalf("quota windows/modes = %d/%d, want five real model buckets", len(snapshot.Windows), len(quotaModes))
 	}
 	windows := make(map[string]account.QuotaWindow, len(snapshot.Windows))
 	for _, window := range snapshot.Windows {
@@ -88,7 +89,11 @@ func TestConsoleQuotaWindowsAreIsolatedByUpstreamModel(t *testing.T) {
 	}
 	for _, spec := range models {
 		mode := adapter.QuotaMode(spec.UpstreamModel)
-		if mode != "console:"+spec.UpstreamModel {
+		expectedModel := spec.UpstreamModel
+		if spec.QuotaModel != "" {
+			expectedModel = spec.QuotaModel
+		}
+		if mode != "console:"+expectedModel {
 			t.Fatalf("quota mode for %q = %q", spec.UpstreamModel, mode)
 		}
 		window, ok := windows[mode]
@@ -99,6 +104,9 @@ func TestConsoleQuotaWindowsAreIsolatedByUpstreamModel(t *testing.T) {
 		if err != nil || refreshed.Mode != mode {
 			t.Fatalf("refresh quota mode %q = %#v, %v", mode, refreshed, err)
 		}
+	}
+	if alias, reasoning := adapter.QuotaMode("grok-4.20-0309"), adapter.QuotaMode("grok-4.20-0309-reasoning"); alias != reasoning {
+		t.Fatalf("official alias quota mode = %q, reasoning mode = %q", alias, reasoning)
 	}
 	if mode := adapter.QuotaMode("unknown-model"); mode != "" {
 		t.Fatalf("unknown model quota mode = %q", mode)
@@ -186,11 +194,11 @@ func TestConsoleImportAcceptsJSONPlainTextAndCookieFormat(t *testing.T) {
 	if len(values) != 2 || values[0].AccessToken != "token-one" || values[1].AccessToken != "token-two" {
 		t.Fatalf("plain values = %#v", values)
 	}
-	values, err = parseImportedCredentials([]byte(`{"provider":"grok_console","accounts":[{"name":"console-a","sso_token":"token-a"}]}`))
+	values, err = parseImportedCredentials([]byte(`{"provider":"grok_console","accounts":[{"name":"console-a","team_id":"team-a","sso_token":"token-a"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(values) != 1 || values[0].Provider != account.ProviderConsole || values[0].AuthType != account.AuthTypeSSO || values[0].Name != "console-a" || values[0].AccessToken != "token-a" {
+	if len(values) != 1 || values[0].Provider != account.ProviderConsole || values[0].AuthType != account.AuthTypeSSO || values[0].Name != "console-a" || values[0].TeamID != "team-a" || values[0].AccessToken != "token-a" {
 		t.Fatalf("json values = %#v", values)
 	}
 }

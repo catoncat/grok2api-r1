@@ -179,7 +179,7 @@ func TestGatewayTeamModelRateLimitOnlySkipsMatchingTeam(t *testing.T) {
 	for index, seed := range []struct {
 		name   string
 		teamID string
-	}{{"console-team-a-first", "team-a"}, {"console-team-a-second", "team-a"}, {"console-team-b", "team-b"}} {
+	}{{"console-team-a-first", "team-stale"}, {"console-team-a-second", "team-a"}, {"console-team-b", "team-b"}} {
 		credential, _, createErr := accountRepo.UpsertByIdentity(ctx, account.Credential{
 			Provider: account.ProviderConsole, AuthType: account.AuthTypeSSO, Name: seed.name, SourceKey: seed.name, TeamID: seed.teamID,
 			EncryptedAccessToken: "encrypted-" + seed.name, Enabled: true, AuthStatus: account.AuthStatusActive,
@@ -208,7 +208,10 @@ func TestGatewayTeamModelRateLimitOnlySkipsMatchingTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	adapter := &teamModelRateLimitConsoleAdapter{rateLimitedTeam: "team-a"}
+	adapter := &teamModelRateLimitConsoleAdapter{
+		rateLimitedTeam: "team-a",
+		teamsByAccount:  map[uint64]string{credentials[0].ID: "team-a"},
+	}
 	registry := provider.NewRegistry(adapter)
 	sticky := memory.NewStickyStore()
 	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
@@ -231,6 +234,10 @@ func TestGatewayTeamModelRateLimitOnlySkipsMatchingTeam(t *testing.T) {
 	assertSuccess("req-team-model-first", models[0])
 	if attempts := adapter.Attempts(); len(attempts) != 2 || attempts[0].AccountID != credentials[0].ID || attempts[1].AccountID != credentials[2].ID {
 		t.Fatalf("first attempts = %#v, want first Team A account then Team B account", attempts)
+	}
+	learned, err := accountRepo.Get(ctx, credentials[0].ID)
+	if err != nil || learned.TeamID != "team-a" {
+		t.Fatalf("observed Team identity was not persisted: %#v, err = %v", learned, err)
 	}
 	assertSuccess("req-team-model-cached", models[0])
 	if attempts := adapter.Attempts(); len(attempts) != 3 || attempts[2].AccountID != credentials[2].ID {
@@ -1251,6 +1258,7 @@ type teamModelRateLimitConsoleAdapter struct {
 	mu              sync.Mutex
 	attempts        []teamModelRateLimitConsoleAttempt
 	rateLimitedTeam string
+	teamsByAccount  map[uint64]string
 }
 
 type ordinaryRateLimitConsoleAdapter struct {
@@ -1286,7 +1294,11 @@ func (a *teamModelRateLimitConsoleAdapter) ForwardResponse(_ context.Context, re
 	a.mu.Lock()
 	a.attempts = append(a.attempts, teamModelRateLimitConsoleAttempt{AccountID: request.Credential.ID, Model: request.Model})
 	a.mu.Unlock()
-	if request.Credential.TeamID != a.rateLimitedTeam {
+	teamID := request.Credential.TeamID
+	if observed := a.teamsByAccount[request.Credential.ID]; observed != "" {
+		teamID = observed
+	}
+	if teamID != a.rateLimitedTeam {
 		return &provider.Response{
 			StatusCode: http.StatusOK, Status: "200 OK", Header: http.Header{"Content-Type": {"application/json"}},
 			Body: io.NopCloser(strings.NewReader(`{"id":"resp-team-success","object":"response","status":"completed"}`)),
@@ -1296,7 +1308,7 @@ func (a *teamModelRateLimitConsoleAdapter) ForwardResponse(_ context.Context, re
 		StatusCode: http.StatusTooManyRequests, Status: "429 Too Many Requests", Header: http.Header{"Content-Type": {"application/json"}},
 		Body: io.NopCloser(strings.NewReader(`{"error":"team model rate limited"}`)),
 		RateLimit: &provider.RateLimitMetadata{
-			Scope: provider.RateLimitScopeRPM, TeamID: request.Credential.TeamID, Model: request.Model,
+			Scope: provider.RateLimitScopeRPM, TeamID: teamID, Model: request.Model,
 			Actual: 61, Limit: 60, RetryAfter: time.Hour,
 		},
 	}, nil

@@ -172,7 +172,7 @@ curl "$BASE_URL/v1/responses" \
 
 Console 同时接受 OpenAI 风格的 `web_search_preview` 工具类型别名，网关会把该类型名转换为上游支持的 `web_search`。免费 SSO 没有可承诺的 SLA，也不能自动续期：`401` 表示需要重新导入 SSO；`429` 应按 `Retry-After` 等待或切换模型；`422` 应检查是否使用了无状态输入以及受支持的工具参数。
 
-Console 的本地额度按“账号 + 真实上游模型”分别记录。默认 `20 次/小时` 且 `source=default` 只是网关的保护性估算，不代表 xAI 官方免费额度；真实的上游 `429` 与 `Retry-After` 才是最终依据。普通额度 429 只暂停当前账号的当前模型；带 Team 和模型信息的频率限制只暂停同一 Team 的同一模型，不会连带阻断其他模型，也不会改变 Web 账号状态。
+Console 的本地额度按“账号 + 真实上游模型”分别记录：6 个兼容调用名归并为 5 个真实模型窗口，其中 `grok-4.20-0309` 与官方指向的 `grok-4.20-0309-reasoning` 共用窗口。默认 `20 次/小时` 且 `source=default` 只是网关的保护性估算，不代表 xAI 官方免费额度；真实的上游 `429` 与 `Retry-After` 才是最终依据。普通额度 429 只暂停当前账号的当前模型；带 Team 和模型信息的频率限制只暂停同一 Team 的同一模型，不会连带阻断其他模型，也不会改变 Web 账号状态。已知 Team 会在 Web 转换或 JSON 导入时保留；纯 Token 导入无法预知 Team，网关会在上游首次返回 Team 级 429 后记住该身份，供后续请求和重启后使用。
 
 ## 模型
 
@@ -193,16 +193,18 @@ Grok Web 内置模型：
 | `grok-imagine-image-edit` | 图片编辑 | Super |
 | `grok-imagine-video` | 视频生成 | Super |
 
-Grok Console 内置模型；当前目录中对外名称与 Console 上游真实模型一一对应：
+Grok Console 接受以下 6 个调用名。[xAI 官方模型文档](https://docs.x.ai/developers/models/grok-4.20-0309-reasoning)将 `grok-4.20-0309` 列为 reasoning 模型的别名，因此它不是第 6 个独立底层模型：
 
 | 对外模型 | Console 上游真实模型 | 能力 |
 | :-- | :-- | :-- |
 | `grok-4.3` | `grok-4.3` | Responses / Chat / Messages / Web 与 X 搜索 |
-| `grok-4.20-0309` | `grok-4.20-0309` | Responses / Chat / Messages / Web 与 X 搜索 |
+| `grok-4.20-0309` | `grok-4.20-0309-reasoning`（官方别名） | Responses / Chat / Messages / Web 与 X 搜索 |
 | `grok-4.20-0309-reasoning` | `grok-4.20-0309-reasoning` | Responses / Chat / Messages / Web 与 X 搜索 |
 | `grok-4.20-0309-non-reasoning` | `grok-4.20-0309-non-reasoning` | Responses / Chat / Messages / Web 与 X 搜索 |
 | `grok-4.20-multi-agent-0309` | `grok-4.20-multi-agent-0309` | Responses / Chat / Messages / Web 与 X 搜索 |
 | `grok-build-0.1` | `grok-build-0.1` | Responses / Chat / Messages / Web 与 X 搜索 |
+
+这里的“真实模型”指 xAI 官方文档可区分的模型标识和限流桶，不声称能识别服务端内部权重或部署版本。[官方限流文档](https://docs.x.ai/developers/rate-limits)同时说明 API Team 按模型设置 RPS/TPM；它不能证明免费 SSO 拥有彼此独立的总调用额度。
 
 `grok-4.5` 不由 Grok Console Provider 注册；即使由 Web SSO 同步创建 Console 账号，该模型在 Console 中仍不可用。
 

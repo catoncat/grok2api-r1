@@ -79,9 +79,10 @@ func (a *Adapter) MarshalCredentials(values []provider.CredentialSeed) ([]byte, 
 
 func (a *Adapter) SyncQuota(_ context.Context, credential account.Credential) (provider.QuotaSnapshot, error) {
 	now := time.Now().UTC()
-	windows := make([]account.QuotaWindow, 0, len(catalog))
-	for _, spec := range catalog {
-		windows = append(windows, newQuotaWindow(credential.ID, quotaModeForModel(spec.UpstreamModel), now))
+	modes := QuotaModes()
+	windows := make([]account.QuotaWindow, 0, len(modes))
+	for _, mode := range modes {
+		windows = append(windows, newQuotaWindow(credential.ID, mode, now))
 	}
 	return provider.QuotaSnapshot{SyncedAt: now, Windows: windows}, nil
 }

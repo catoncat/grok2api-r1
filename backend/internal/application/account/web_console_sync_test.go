@@ -43,7 +43,7 @@ func TestSyncWebAccountsToConsoleIsIdempotentAndPreservesBuildLink(t *testing.T)
 	token := "shared-sso-token"
 	webAccount, _, err := accounts.UpsertByIdentity(ctx, accountdomain.Credential{
 		Provider: accountdomain.ProviderWeb, AuthType: accountdomain.AuthTypeSSO,
-		Name: "Grok Web primary", SourceKey: "sso:" + security.HashToken(token),
+		Name: "Grok Web primary", TeamID: "team-primary", SourceKey: "sso:" + security.HashToken(token),
 		EncryptedAccessToken: encrypt(token), Enabled: true, AuthStatus: accountdomain.AuthStatusActive,
 	})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestSyncWebAccountsToConsoleIsIdempotentAndPreservesBuildLink(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if consoleAccount.Provider != accountdomain.ProviderConsole || consoleAccount.Name != "Grok Console primary" || decrypted != token {
+	if consoleAccount.Provider != accountdomain.ProviderConsole || consoleAccount.Name != "Grok Console primary" || consoleAccount.TeamID != "team-primary" || decrypted != token {
 		t.Fatalf("console account = %#v, token = %q", consoleAccount, decrypted)
 	}
 

@@ -22,6 +22,7 @@ type importDocument struct {
 
 type importEntry struct {
 	Name     string `json:"name"`
+	TeamID   string `json:"team_id,omitempty"`
 	SSOToken string `json:"sso_token"`
 	Token    string `json:"token"`
 }
@@ -61,11 +62,17 @@ func parseImportedCredentials(data []byte) ([]provider.CredentialSeed, error) {
 			continue
 		}
 		seen[token] = struct{}{}
+		teamID := strings.TrimSpace(entry.TeamID)
+		if len(teamID) > 255 {
+			return nil, fmt.Errorf("第 %d 个账号的 team_id 超过 255 字符", index+1)
+		}
 		name := strings.TrimSpace(entry.Name)
 		if name == "" {
 			name = "Grok Console " + security.HashToken(token)[:8]
 		}
-		result = append(result, credentialSeed(name, token))
+		seed := credentialSeed(name, token)
+		seed.TeamID = teamID
+		result = append(result, seed)
 	}
 	return result, nil
 }
@@ -107,7 +114,7 @@ func credentialSeed(name, token string) provider.CredentialSeed {
 func marshalCredentials(values []provider.CredentialSeed) ([]byte, error) {
 	document := importDocument{Provider: string(account.ProviderConsole), Accounts: make([]importEntry, 0, len(values))}
 	for _, value := range values {
-		document.Accounts = append(document.Accounts, importEntry{Name: value.Name, SSOToken: value.AccessToken})
+		document.Accounts = append(document.Accounts, importEntry{Name: value.Name, TeamID: value.TeamID, SSOToken: value.AccessToken})
 	}
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
