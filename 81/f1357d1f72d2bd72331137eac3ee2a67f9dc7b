@@ -1,0 +1,75 @@
+backend/internal/infra/provider/console/console_test.go
+  s_54653f60ac62a9::t_fe0fa70fc97652 79-81,92-96,108-110,197,201
+backend/internal/repository/account.go
+  s_54653f60ac62a9::t_a69e95714ec758 56
+README.md
+  s_54653f60ac62a9::t_f9da0285749cac 175,201
+  s_54653f60ac62a9::t_649e8953f6b628 196,207
+  s_3c753ea797424e::t_19321dc501f1ec 208
+backend/internal/application/account/service.go
+  s_54653f60ac62a9::t_d4d5c59e89ceb9 868,1641-1648
+  s_3c753ea797424e::t_0e544280500cda 1649-1650
+frontend/src/features/accounts/account-quota.tsx
+  s_54653f60ac62a9::t_0c48d9aaded744 130
+  s_54653f60ac62a9::t_a374ac2a32f085 109-116,119-129,131-145,195,203
+backend/internal/application/gateway/service.go
+  s_54653f60ac62a9::t_76a2f19155e775 159,182,189,443-446,483,597-610,613-615
+  s_54653f60ac62a9::t_e62635001ce3ea 162-163,166-177,179,611-612
+  s_54653f60ac62a9::t_1f57e10a5d2296 164-165
+backend/internal/infra/persistence/relational/postgres_integration_test.go
+  s_54653f60ac62a9::t_2a7777b23d6457 28,38-52
+backend/internal/application/account/web_console_sync_test.go
+  s_54653f60ac62a9::t_1bafc3389e6833 46,91
+backend/internal/infra/provider/console/import.go
+  s_54653f60ac62a9::t_d4d5c59e89ceb9 25,73,75,117
+  s_54653f60ac62a9::t_dcecc6e5187c8e 65-68,74
+backend/internal/infra/persistence/relational/console_provider_test.go
+  s_54653f60ac62a9::t_1bb4894e8275d3 70-114,152
+  s_54653f60ac62a9::t_e3d7e8b834272b 115-118,120,151
+  s_54653f60ac62a9::t_e62635001ce3ea 119,121-150
+backend/internal/app/application.go
+  s_54653f60ac62a9::t_b6abf115037375 194,196-198,200
+  s_54653f60ac62a9::t_e3d7e8b834272b 195,199,208-209
+  s_54653f60ac62a9::t_09b68a444d19e9 201-207,210
+frontend/src/shared/i18n/index.ts
+  s_54653f60ac62a9::t_8509f9a35c6171 336,826
+backend/internal/infra/provider/console/catalog.go
+  s_54653f60ac62a9::t_f7ea96b6e36599 18,27-29,85-89,94-110
+  s_3c753ea797424e::t_9b27b5de082d23 111-112
+backend/internal/application/gateway/service_test.go
+  s_54653f60ac62a9::t_e62635001ce3ea 182
+  s_54653f60ac62a9::t_3c55084eb1ae04 211-214,238-241,1261,1297-1301,1311
+backend/internal/infra/persistence/relational/account_repository.go
+  s_54653f60ac62a9::t_e62635001ce3ea 977-980,992-997,1001-1002,1007-1008
+  s_54653f60ac62a9::t_a69e95714ec758 781-797,945-976,981-991
+  s_54653f60ac62a9::t_bbfb847bc6e80d 942-944,998-1000,1003-1006
+  s_54653f60ac62a9::t_b3859a882c9162 1009
+backend/internal/infra/provider/console/adapter.go
+  s_54653f60ac62a9::t_f7ea96b6e36599 82-85
+frontend/src/features/accounts/accounts-page.tsx
+  s_54653f60ac62a9::t_8509f9a35c6171 926-934
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "81f1357d1f72d2bd72331137eac3ee2a67f9dc7b",
+  "prompts": {},
+  "sessions": {
+    "s_3c753ea797424e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a90-f975-72a0-b62f-5436017bdbe8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_54653f60ac62a9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a96-6b17-7360-ae10-e0d870c833f3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
