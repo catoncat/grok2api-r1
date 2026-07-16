@@ -56,6 +56,9 @@ func TestStatsigLocalFirstAndForcedRemoteFallback(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
 	})}
 	lease := &infraegress.Lease{NodeID: 1, UserAgent: "ua"}
+	if warmed, err := signer.Warm(context.Background(), "https://grok.example", "token", lease); err != nil || warmed != 1 {
+		t.Fatalf("warmed=%d err=%v", warmed, err)
+	}
 	value, source, err := signer.Sign(context.Background(), "https://grok.example", "https://signer.example", "token", lease, http.MethodPost, "https://grok.example/rest/test")
 	if err != nil || value != localID || source != "local" || remoteCalls.Load() != 0 {
 		t.Fatalf("local value=%q source=%q remote=%d err=%v", value, source, remoteCalls.Load(), err)
@@ -278,7 +281,7 @@ func TestStatsigWarmupFetchesMetaOnceForSharedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if warmed != 1 || fetches != 1 || signatures != 0 {
+	if warmed != 0 || fetches != 1 || signatures != 0 {
 		t.Fatalf("warmed=%d fetches=%d signatures=%d", warmed, fetches, signatures)
 	}
 	if warmedAgain, err := signer.Warm(context.Background(), "https://grok.com", "token", nil); err != nil || warmedAgain != 0 || fetches != 1 {

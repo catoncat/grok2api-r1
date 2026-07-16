@@ -32,6 +32,8 @@ const (
 	statsigInvalidateWindow = 30 * time.Second
 	statsigMetaBodyLimit    = 4 << 20
 	statsigResponseLimit    = 4 << 10
+	statsigLocalMaxEntries  = 16
+	statsigRecentMaxEntries = 64 << 10
 )
 
 type statsigCacheEntry struct {
@@ -45,6 +47,11 @@ type statsigMetaResult struct {
 	generation uint64
 }
 
+type statsigSignatureEntry struct {
+	value  string
+	seenAt time.Time
+}
+
 type statsigSigner struct {
 	client           *http.Client
 	fetchMeta        func(context.Context, string, string, *infraegress.Lease) (string, error)
@@ -53,17 +60,17 @@ type statsigSigner struct {
 	mu               sync.Mutex
 	entries          map[string]statsigCacheEntry
 	recentSignatures map[string]time.Time
+	recentOrder      []statsigSignatureEntry
 	invalidations    map[string]time.Time
 	generation       uint64
 	refreshes        singleflight.Group
 	localRefreshes   singleflight.Group
-	localMu          sync.Mutex
 	locals           map[string]statsigLocalChallenge
-	localGeneration  uint64
 	fetchLocal       func(context.Context, string, string, *infraegress.Lease) (statsigLocalChallenge, error)
 }
 
 var errStatsigMetaInvalidated = errors.New("Statsig meta refresh invalidated")
+var errStatsigLocalCold = errors.New("local Statsig is not warmed")
 
 func newStatsigSigner() *statsigSigner {
 	return &statsigSigner{
@@ -89,7 +96,7 @@ func (s *statsigSigner) Sign(ctx context.Context, baseURL, signerURL, token stri
 		return "", "", err
 	}
 	if !forceRemote {
-		if value, localErr := s.localSign(ctx, baseURL, token, lease, method, path); localErr == nil {
+		if value, localErr := s.localSign(ctx, baseURL, method, path); localErr == nil {
 			return value, "local", nil
 		}
 	}
@@ -118,17 +125,14 @@ func (s *statsigSigner) Sign(ctx context.Context, baseURL, signerURL, token stri
 	return "", "", errStatsigMetaInvalidated
 }
 
-// Warm 只预热 Grok 首页的 metaContent；最终签名必须按请求生成，不能复用。
+// Warm 在后台构建本地 signer；失败时仍预热远端 meta 作为业务兜底。
 func (s *statsigSigner) Warm(ctx context.Context, baseURL, token string, lease *infraegress.Lease) (int, error) {
-	if _, err := s.localSign(ctx, baseURL, token, lease, http.MethodPost, "/rest/app-chat/conversations/new"); err == nil {
+	if err := s.warmLocal(ctx, baseURL, token, lease); err == nil {
 		return 1, nil
 	}
-	meta, err := s.meta(ctx, baseURL, token, lease)
+	_, err := s.meta(ctx, baseURL, token, lease)
 	if err != nil {
 		return 0, err
-	}
-	if meta.source == "meta_refresh" {
-		return 1, nil
 	}
 	return 0, nil
 }
@@ -174,10 +178,7 @@ func (s *statsigSigner) Invalidate(baseURL string) {
 		return
 	}
 	delete(s.entries, key)
-	s.localMu.Lock()
-	clear(s.locals) // local entries are keyed by per-lease fingerprints, not base URL.
-	s.localGeneration++
-	s.localMu.Unlock()
+	clear(s.locals)
 	s.invalidations[key] = now
 	s.generation++
 	s.mu.Unlock()
@@ -187,9 +188,7 @@ func (s *statsigSigner) Clear() {
 	s.mu.Lock()
 	clear(s.entries)
 	clear(s.invalidations)
-	s.localMu.Lock()
 	clear(s.locals)
-	s.localMu.Unlock()
 	s.generation++
 	s.mu.Unlock()
 }
@@ -222,15 +221,21 @@ func (s *statsigSigner) claimSignature(value string, now time.Time, generation u
 	if generation != s.generation {
 		return false, false
 	}
-	for signature, seenAt := range s.recentSignatures {
-		if !now.Before(seenAt.Add(statsigCacheTTL)) {
-			delete(s.recentSignatures, signature)
+	for len(s.recentOrder) > 0 && !now.Before(s.recentOrder[0].seenAt.Add(statsigCacheTTL)) {
+		entry := s.recentOrder[0]
+		s.recentOrder = s.recentOrder[1:]
+		if seenAt, ok := s.recentSignatures[entry.value]; ok && seenAt.Equal(entry.seenAt) {
+			delete(s.recentSignatures, entry.value)
 		}
 	}
 	if _, exists := s.recentSignatures[value]; exists {
 		return false, true
 	}
+	if len(s.recentSignatures) >= statsigRecentMaxEntries {
+		return false, true
+	}
 	s.recentSignatures[value] = now
+	s.recentOrder = append(s.recentOrder, statsigSignatureEntry{value: value, seenAt: now})
 	return true, true
 }
 
@@ -257,6 +262,50 @@ func (s *statsigSigner) storeIfGeneration(key, value string, expiresAt, now time
 	}
 	s.entries[key] = statsigCacheEntry{value: value, expiresAt: expiresAt}
 	return true
+}
+
+func (s *statsigSigner) cachedLocal(key string, now time.Time) (statsigLocalChallenge, uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.locals[key]
+	if !ok || !now.Before(entry.expiresAt) {
+		delete(s.locals, key)
+		return statsigLocalChallenge{}, s.generation, false
+	}
+	return entry, s.generation, true
+}
+
+func (s *statsigSigner) storeLocalIfGeneration(key string, value statsigLocalChallenge, now time.Time, generation uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if generation != s.generation {
+		return false
+	}
+	for existingKey, entry := range s.locals {
+		if !now.Before(entry.expiresAt) {
+			delete(s.locals, existingKey)
+		}
+	}
+	if len(s.locals) >= statsigLocalMaxEntries {
+		oldestKey := ""
+		var oldestExpiry time.Time
+		for existingKey, entry := range s.locals {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey, oldestExpiry = existingKey, entry.expiresAt
+			}
+		}
+		delete(s.locals, oldestKey)
+	}
+	s.locals[key] = value
+	return true
+}
+
+func (s *statsigSigner) dropLocalIfGeneration(key string, generation uint64) {
+	s.mu.Lock()
+	if generation == s.generation {
+		delete(s.locals, key)
+	}
+	s.mu.Unlock()
 }
 
 func statsigMetaKey(baseURL string) string {
@@ -434,7 +483,7 @@ func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request,
 	value, source, err := a.statsig.Sign(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, request.Method, request.URL.String(), forceRemote)
 	if err == nil {
 		request.Header.Set("x-statsig-id", value)
-		if source == "meta_refresh" || source == "local" {
+		if source == "meta_refresh" {
 			a.log().Info("web_statsig_meta_refreshed", "method", request.Method, "path", request.URL.EscapedPath())
 		}
 		return nil

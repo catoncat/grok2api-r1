@@ -39,6 +39,8 @@ const (
 	statsigCurvesBytes       = 64 << 10
 	statsigCurveGroupsMax    = 64
 	statsigCurvesPerGroupMax = 64
+	statsigLocalSignAttempts = 16
+	statsigLocalRetryDelay   = time.Millisecond
 )
 
 var (
@@ -68,50 +70,72 @@ type statsigRuntime struct {
 	sign goja.Callable
 }
 
-func localStatsigKey(base string, lease *infraegress.Lease) string {
-	h := sha256.New()
-	_, _ = io.WriteString(h, strings.TrimRight(strings.TrimSpace(base), "/"))
-	if lease != nil {
-		_, _ = io.WriteString(h, fmt.Sprintf("/%d/", lease.NodeID))
-		_, _ = io.WriteString(h, lease.UserAgent)
-		_, _ = io.WriteString(h, lease.CFCookies)
-		_, _ = io.WriteString(h, lease.ProxyURL)
-	}
-	return hex.EncodeToString(h.Sum(nil))
+func localStatsigKey(base string) string {
+	return statsigMetaKey(base)
 }
 
-func (s *statsigSigner) localSign(ctx context.Context, base, token string, lease *infraegress.Lease, method, path string) (string, error) {
-	if lease == nil {
-		return "", errors.New("local Statsig needs egress lease")
+func (s *statsigSigner) localSign(ctx context.Context, base, method, path string) (string, error) {
+	key := localStatsigKey(base)
+	ch, generation, ok := s.cachedLocal(key, s.now())
+	if !ok {
+		return "", errStatsigLocalCold
 	}
-	key := localStatsigKey(base, lease)
-	s.localMu.Lock()
-	ch, ok := s.locals[key]
-	s.localMu.Unlock()
-	if !ok || !s.now().Before(ch.expiresAt) {
-		value, err, _ := s.localRefreshes.Do(key, func() (any, error) {
-			s.localMu.Lock()
-			cached, found := s.locals[key]
-			s.localMu.Unlock()
-			if found && s.now().Before(cached.expiresAt) {
+	for attempt := 0; attempt < statsigLocalSignAttempts; attempt++ {
+		id, err := ch.engine.signID(ctx, ch.seed, ch.curves, method, path)
+		if err != nil {
+			s.dropLocalIfGeneration(key, generation)
+			return "", err
+		}
+		claimed, current := s.claimSignature(id, s.now().UTC(), generation)
+		if !current {
+			return "", errStatsigMetaInvalidated
+		}
+		if claimed {
+			return id, nil
+		}
+		timer := time.NewTimer(statsigLocalRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return "", errors.New("local Statsig produced duplicate IDs")
+}
+
+func (s *statsigSigner) warmLocal(ctx context.Context, base, token string, lease *infraegress.Lease) error {
+	if lease == nil {
+		return errors.New("local Statsig needs egress lease")
+	}
+	key := localStatsigKey(base)
+	for attempt := 0; attempt < statsigMetaAttempts; attempt++ {
+		if _, _, ok := s.cachedLocal(key, s.now()); ok {
+			return nil
+		}
+		generation := s.currentGeneration()
+		flightKey := fmt.Sprintf("%s/%d", key, generation)
+		_, err, _ := s.localRefreshes.Do(flightKey, func() (any, error) {
+			if cached, cachedGeneration, ok := s.cachedLocal(key, s.now()); ok && cachedGeneration == generation {
 				return cached, nil
 			}
 			fresh, fetchErr := s.fetchLocal(ctx, base, token, lease)
 			if fetchErr != nil {
 				return nil, fetchErr
 			}
-			fresh.expiresAt = s.now().Add(statsigCacheTTL)
-			s.localMu.Lock()
-			s.locals[key] = fresh
-			s.localMu.Unlock()
+			now := s.now()
+			fresh.expiresAt = now.Add(statsigCacheTTL)
+			if !s.storeLocalIfGeneration(key, fresh, now, generation) {
+				return nil, errStatsigMetaInvalidated
+			}
 			return fresh, nil
 		})
-		if err != nil {
-			return "", err
+		if errors.Is(err, errStatsigMetaInvalidated) {
+			continue
 		}
-		ch = value.(statsigLocalChallenge)
+		return err
 	}
-	return ch.engine.signID(ctx, ch.seed, ch.curves, method, path)
+	return errStatsigMetaInvalidated
 }
 
 func fetchStatsigLocalChallenge(ctx context.Context, base, token string, lease *infraegress.Lease) (statsigLocalChallenge, error) {
