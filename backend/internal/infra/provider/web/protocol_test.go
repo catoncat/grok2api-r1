@@ -278,6 +278,22 @@ type trackingEgressRepository struct {
 	updates int
 }
 
+type prefixErrorReader struct {
+	data     []byte
+	err      error
+	returned bool
+}
+
+func (r *prefixErrorReader) Read(target []byte) (int, error) {
+	if r.returned {
+		return 0, r.err
+	}
+	r.returned = true
+	return copy(target, r.data), r.err
+}
+
+func (*prefixErrorReader) Close() error { return nil }
+
 func (s *trackingEgressRepository) ListEgressNodes(_ context.Context, scope egressdomain.Scope, _ repository.SortQuery) ([]egressdomain.Node, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -543,18 +559,18 @@ func TestPreflightClassifiesAntiBotRejection(t *testing.T) {
 }
 
 func TestPreflightClassifiesCode7WithoutPoisoningAntiBotSignal(t *testing.T) {
-	source := io.NopCloser(strings.NewReader(`{"error":{"message":"signature rejected","code":7}}` + "\n"))
+	source := io.NopCloser(strings.NewReader(`{"error":{"message":"Request rejected by anti-bot rules.","code":7}}` + "\n"))
 	if _, err := preflightUpstream(source); !errors.Is(err, errWebCode7) || errors.Is(err, errWebAntiBot) {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestLiteCode7RetriesWithoutEgressFeedback(t *testing.T) {
+func TestLiteCode7WithAntiBotTextRetriesWithoutEgressFeedback(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		writer.WriteHeader(http.StatusForbidden)
-		_, _ = io.WriteString(writer, `{"error":{"message":"signature rejected","code":7}}`)
+		_, _ = io.WriteString(writer, `{"error":{"message":"Request rejected by anti-bot rules.","code":7}}`)
 	}))
 	defer server.Close()
 	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
@@ -647,6 +663,30 @@ func TestPeekWebResponseErrorReplaysLongBody(t *testing.T) {
 	got, readErr := io.ReadAll(replayed)
 	if readErr != nil || string(got) != body {
 		t.Fatalf("replayed len=%d want=%d err=%v", len(got), len(body), readErr)
+	}
+}
+
+func TestPeekWebResponseErrorReplaysBytesAfterReadError(t *testing.T) {
+	readErr := errors.New("upstream read interrupted")
+	source := &prefixErrorReader{data: []byte(`{"error":{"message":"partial"`), err: readErr}
+	replayed, err := peekWebResponseError(source, 1<<20)
+	if !errors.Is(err, readErr) {
+		t.Fatalf("peek error = %v", err)
+	}
+	got, replayErr := io.ReadAll(replayed)
+	if string(got) != `{"error":{"message":"partial"` || !errors.Is(replayErr, readErr) {
+		t.Fatalf("replayed=%q error=%v", got, replayErr)
+	}
+}
+
+func TestImagineWebSocketErrorClassifiesCode7BeforeAntiBotText(t *testing.T) {
+	code7 := imagineWebSocketError(map[string]any{"type": "error", "message": "Request rejected by anti-bot rules.", "code": float64(7)})
+	if !errors.Is(code7, errWebCode7) || errors.Is(code7, errWebAntiBot) {
+		t.Fatalf("code 7 error = %v", code7)
+	}
+	antiBot := imagineWebSocketError(map[string]any{"type": "error", "message": "Request rejected by anti-bot rules."})
+	if !errors.Is(antiBot, errWebAntiBot) || errors.Is(antiBot, errWebCode7) {
+		t.Fatalf("anti-bot error = %v", antiBot)
 	}
 }
 

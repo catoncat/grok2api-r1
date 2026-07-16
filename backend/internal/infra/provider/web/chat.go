@@ -884,10 +884,11 @@ func webResponseError(value map[string]any) error {
 // upstream error bodies verbatim.
 func peekWebResponseError(source io.ReadCloser, limit int64) (io.ReadCloser, error) {
 	prefix, err := io.ReadAll(io.LimitReader(source, limit))
+	replayed := &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefix), source), closer: source}
 	if err != nil {
-		return source, err
+		return replayed, err
 	}
-	return &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefix), source), closer: source}, webResponseErrorFromBody(prefix)
+	return replayed, webResponseErrorFromBody(prefix)
 }
 
 func webResponseErrorFromBody(body []byte) error {

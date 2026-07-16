@@ -240,6 +240,9 @@ func (a *Adapter) syncWeeklyCredits(ctx context.Context, credential account.Cred
 	if err != nil {
 		return account.QuotaWindow{}, err
 	}
+	if errors.Is(webResponseErrorFromBody(body), errWebCode7) {
+		return account.QuotaWindow{}, fmt.Errorf("Grok Web 周额度接口返回 code 7")
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)
 		if response.StatusCode == http.StatusUnauthorized {

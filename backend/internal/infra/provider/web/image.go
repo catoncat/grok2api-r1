@@ -597,7 +597,10 @@ func (a *Adapter) generateWSImage(ctx context.Context, request provider.ImageGen
 			continue
 		}
 		if message["type"] == "error" {
-			upstreamErr := fmt.Errorf("Imagine WebSocket 返回错误")
+			upstreamErr := imagineWebSocketError(message)
+			if errors.Is(upstreamErr, errWebCode7) {
+				return nil, upstreamErr
+			}
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, upstreamErr)
 			return nil, upstreamErr
 		}
@@ -1108,7 +1111,12 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 			continue
 		}
 		if message["type"] == "error" {
-			upstreamErr := fmt.Errorf("Imagine WebSocket 返回错误")
+			upstreamErr := imagineWebSocketError(message)
+			if errors.Is(upstreamErr, errWebCode7) {
+				writeImagineStreamFailure(writer, streamID, "upstream_error", "上游图片生成失败")
+				_ = writer.CloseWithError(upstreamErr)
+				return
+			}
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, upstreamErr)
 			writeImagineStreamFailure(writer, streamID, "upstream_error", "上游图片生成失败")
 			_ = writer.CloseWithError(upstreamErr)
@@ -1154,6 +1162,13 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 		return
 	}
 	_ = writer.Close()
+}
+
+func imagineWebSocketError(message map[string]any) error {
+	if value, ok := message["error"].(map[string]any); ok {
+		return webResponseError(value)
+	}
+	return webResponseError(message)
 }
 
 func writeImagineStreamFailure(writer io.Writer, streamID, code, message string) {

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,6 +44,32 @@ func TestSyncQuotaModeCode7RetriesWithoutEgressFeedback(t *testing.T) {
 	_, err = adapter.SyncQuotaMode(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token}, "fast")
 	if err == nil || calls.Load() != 2 {
 		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestSyncWeeklyCreditsCode7WithAntiBotTextDoesNotFeedbackEgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte(`{"error":{"message":"Request rejected by anti-bot rules.","code":7}}`))
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 11, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	_, err = adapter.syncWeeklyCredits(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token})
+	if err == nil || !strings.Contains(err.Error(), "code 7") {
+		t.Fatalf("error = %v", err)
 	}
 	node, updates := repository.snapshot()
 	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
