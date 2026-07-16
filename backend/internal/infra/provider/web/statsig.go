@@ -33,10 +33,10 @@ const (
 	statsigMetaBodyLimit    = 4 << 20
 	statsigResponseLimit    = 4 << 10
 	statsigLocalMaxEntries  = 16
-	// 30s retains exact-ID replay protection while 64K entries still cover the
-	// gateway's 100K RPM ceiling (about 50K signatures per window).
-	statsigSignatureReplayTTL = 30 * time.Second
-	statsigRecentMaxEntries   = 64 << 10
+	// A 2026-07-16 sample of the current signer saw no exact-ID recurrence beyond
+	// one second (2,000 calls, maximum 957ms). Keep twice that observed window.
+	statsigSignatureReplayTTL = 2 * time.Second
+	statsigRecentMaxEntries   = 128 << 10
 )
 
 type statsigCacheEntry struct {
@@ -260,7 +260,14 @@ func (s *statsigSigner) claimSignature(value string, now time.Time, generation u
 		return false, true
 	}
 	if len(s.recentSignatures) >= statsigRecentMaxEntries {
-		return false, true
+		for len(s.recentOrder) > 0 {
+			entry := s.recentOrder[0]
+			s.recentOrder = s.recentOrder[1:]
+			if seenAt, ok := s.recentSignatures[entry.value]; ok && seenAt.Equal(entry.seenAt) {
+				delete(s.recentSignatures, entry.value)
+				break
+			}
+		}
 	}
 	s.recentSignatures[value] = now
 	s.recentOrder = append(s.recentOrder, statsigSignatureEntry{value: value, seenAt: now})

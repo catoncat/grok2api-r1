@@ -120,7 +120,7 @@ func TestStatsigLocalDuplicateIsNotReturned(t *testing.T) {
 	}
 }
 
-func TestStatsigRecentSignatureCapacityFailsClosed(t *testing.T) {
+func TestStatsigRecentSignatureCapacityEvictsOnlyOldest(t *testing.T) {
 	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
 	signer := newStatsigSigner()
 	generation := signer.currentGeneration()
@@ -130,8 +130,14 @@ func TestStatsigRecentSignatureCapacityFailsClosed(t *testing.T) {
 			t.Fatalf("signature %d claimed=%t current=%t", sequence, claimed, current)
 		}
 	}
-	if claimed, current := signer.claimSignature("over-capacity", now, generation); claimed || !current {
+	if claimed, current := signer.claimSignature("over-capacity", now, generation); !claimed || !current {
 		t.Fatalf("over-capacity claimed=%t current=%t", claimed, current)
+	}
+	if claimed, current := signer.claimSignature("signature-0", now, generation); !claimed || !current {
+		t.Fatalf("oldest signature claimed=%t current=%t", claimed, current)
+	}
+	if claimed, current := signer.claimSignature("over-capacity", now, generation); claimed || !current {
+		t.Fatalf("recent signature claimed=%t current=%t", claimed, current)
 	}
 	now = now.Add(statsigSignatureReplayTTL)
 	if claimed, current := signer.claimSignature("after-expiry", now, generation); !claimed || !current {
