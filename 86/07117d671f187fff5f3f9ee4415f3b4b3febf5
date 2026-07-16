@@ -1,0 +1,27 @@
+backend/internal/transport/http/inference/handler_test.go
+  s_66f58e62c51c03::t_b399eb6d530a78 106-122
+backend/internal/infra/provider/web/protocol_test.go
+  s_66f58e62c51c03::t_1f25b9d27fea12 711-713
+  s_66f58e62c51c03::t_b399eb6d530a78 726-727,734-736
+  s_66f58e62c51c03::t_c5418e3f397d0e 724-725,728-733,737-739
+backend/internal/application/gateway/image.go
+  s_66f58e62c51c03::t_1f25b9d27fea12 188-189,194,198-203
+backend/internal/infra/provider/web/image.go
+  s_66f58e62c51c03::t_1f25b9d27fea12 981-990,995
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "8607117d671f187fff5f3f9ee4415f3b4b3febf5",
+  "prompts": {},
+  "sessions": {
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
