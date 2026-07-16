@@ -1,0 +1,19 @@
+backend/internal/infra/provider/web/statsig_engine.go
+  s_66f58e62c51c03::t_60edb33f03d4ed 316-318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "76ad4c3eb2dde60716f8510f19e454ced73c6f04",
+  "prompts": {},
+  "sessions": {
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
