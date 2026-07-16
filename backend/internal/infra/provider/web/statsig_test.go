@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,6 +36,76 @@ func TestExtractStatsigMetaContentAcceptsCurrentMetaName(t *testing.T) {
 		if err != nil || value != "meta-value" {
 			t.Fatalf("name=%q value=%q err=%v", name, value, err)
 		}
+	}
+}
+
+func TestStatsigLocalFirstAndForcedRemoteFallback(t *testing.T) {
+	localID := testStatsigID(11)
+	remoteID := testStatsigID(12)
+	engine := &statsigEngine{source: `TURBOPACK.push([[],{},function(c){c.s("default",function(){return function(){return Promise.resolve("` + localID + `")}})}]);`, pool: make(chan *statsigRuntime, statsigRuntimeMax)}
+	signer := newStatsigSigner()
+	signer.fetchLocal = func(context.Context, string, string, *infraegress.Lease) (statsigLocalChallenge, error) {
+		return statsigLocalChallenge{seed: "seed", curves: "[]", engine: engine}, nil
+	}
+	signer.fetchMeta = func(context.Context, string, string, *infraegress.Lease) (string, error) { return "meta", nil }
+	signer.validateEndpoint = func(context.Context, string) error { return nil }
+	var remoteCalls atomic.Int64
+	signer.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		remoteCalls.Add(1)
+		body, _ := json.Marshal(map[string]string{"x-statsig-id": remoteID})
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
+	})}
+	lease := &infraegress.Lease{NodeID: 1, UserAgent: "ua"}
+	value, source, err := signer.Sign(context.Background(), "https://grok.example", "https://signer.example", "token", lease, http.MethodPost, "https://grok.example/rest/test")
+	if err != nil || value != localID || source != "local" || remoteCalls.Load() != 0 {
+		t.Fatalf("local value=%q source=%q remote=%d err=%v", value, source, remoteCalls.Load(), err)
+	}
+	value, source, err = signer.Sign(context.Background(), "https://grok.example", "https://signer.example", "token", lease, http.MethodPost, "https://grok.example/rest/test", true)
+	if err != nil || value != remoteID || source == "local" || remoteCalls.Load() != 1 {
+		t.Fatalf("remote value=%q source=%q remote=%d err=%v", value, source, remoteCalls.Load(), err)
+	}
+}
+
+func TestStatsigChunkBoundaryRejectsCredentialsAndCrossOrigin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Cookie") != "" || request.Header.Get("Authorization") != "" || request.Header.Get("CF-Connecting-IP") != "" {
+			t.Fatalf("direct chunk leaked credentials: %#v", request.Header)
+		}
+		_, _ = w.Write([]byte("chunk"))
+	}))
+	defer server.Close()
+	client := &http.Client{}
+	if _, err := fetchStatsigChunk(context.Background(), client, server.URL, "/_next/static/chunks/a.js", 32); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fetchStatsigChunk(context.Background(), client, server.URL, "https://elsewhere.example/_next/static/chunks/a.js", 32); err == nil {
+		t.Fatal("cross-origin chunk accepted")
+	}
+	if _, err := fetchStatsigChunk(context.Background(), client, server.URL, "/api/private", 32); err == nil {
+		t.Fatal("non-chunk path accepted")
+	}
+}
+
+func TestStatsigRuntimePoolIsBounded(t *testing.T) {
+	value := testStatsigID(21)
+	engine := &statsigEngine{source: `TURBOPACK.push([[],{},function(c){c.s("default",function(){return function(){return Promise.resolve("` + value + `")}})}]);`, pool: make(chan *statsigRuntime, statsigRuntimeMax)}
+	var wait sync.WaitGroup
+	for range 12 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			got, err := engine.signID(context.Background(), "seed", "[]", http.MethodPost, "/rest/test")
+			if err != nil || got != value {
+				t.Errorf("sign got=%q err=%v", got, err)
+			}
+		}()
+	}
+	wait.Wait()
+	engine.mu.Lock()
+	created := engine.created
+	engine.mu.Unlock()
+	if created > statsigRuntimeMax {
+		t.Fatalf("runtime count %d exceeds %d", created, statsigRuntimeMax)
 	}
 }
 
@@ -490,7 +561,7 @@ func TestApplySignedStatsigUsesManualValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adapter.applySignedStatsig(context.Background(), request, "token", nil); err != nil {
+	if err := adapter.applySignedStatsig(context.Background(), request, "token", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if request.Header.Get("x-statsig-id") != value {
@@ -554,7 +625,7 @@ func TestApplySignedStatsigNeverLeavesRandomFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("x-statsig-id", "random-fallback")
-	err = adapter.applySignedStatsig(context.Background(), request, "token", nil)
+	err = adapter.applySignedStatsig(context.Background(), request, "token", nil, false)
 	if value := request.Header.Get("x-statsig-id"); value != "" {
 		t.Fatalf("x-statsig-id = %q", value)
 	}

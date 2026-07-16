@@ -149,7 +149,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	var parsed parsedChat
 	var previous *inferencedomain.WebResponseState
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized)
+		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0)
 		if openErr != nil {
 			if errors.Is(openErr, errInvalidChatImage) {
 				return jsonProviderResponse(http.StatusBadRequest, map[string]any{"error": map[string]any{
@@ -308,7 +308,7 @@ func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("Grok Web 首个流事件超过安全检查上限")
 }
 
-func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
+func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput, forceRemote bool) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
 	cfg := a.config()
 	token, err := a.cipher.Decrypt(credential.EncryptedAccessToken)
 	if err != nil {
@@ -355,7 +355,7 @@ func (a *Adapter) openChat(ctx context.Context, credential account.Credential, p
 		return nil, nil, nil, "", err
 	}
 	request.Header = buildSignedHeaders(token, lease, "application/json")
-	if err := a.applySignedStatsig(requestCtx, request, token, lease); err != nil {
+	if err := a.applySignedStatsig(requestCtx, request, token, lease, forceRemote); err != nil {
 		cancel()
 		lease.Release()
 		return nil, nil, nil, "", err

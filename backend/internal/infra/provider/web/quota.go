@@ -149,7 +149,7 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 			return account.QuotaWindow{}, requestErr
 		}
 		request.Header = buildSignedHeaders(token, lease, "application/json")
-		if err := a.applySignedStatsig(requestCtx, request, token, lease); err != nil {
+		if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
 			return account.QuotaWindow{}, err
 		}
 		response, err = lease.Do(request)

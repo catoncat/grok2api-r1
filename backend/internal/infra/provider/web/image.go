@@ -303,7 +303,7 @@ func (e *liteUpstreamError) Response() *provider.Response {
 
 func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.Credential, spec ModelSpec, prompt string) (string, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt})
+		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt}, attempt > 0)
 		if err != nil {
 			return "", err
 		}
@@ -954,7 +954,7 @@ func (a *Adapter) postSignedJSON(ctx context.Context, cfg Config, lease *egress.
 			return nil, err
 		}
 		request.Header = buildSignedHeaders(token, lease, "application/json")
-		if err := a.applySignedStatsig(requestCtx, request, token, lease); err != nil {
+		if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
 			cancel()
 			return nil, err
 		}

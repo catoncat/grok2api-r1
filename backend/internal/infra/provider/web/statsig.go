@@ -56,6 +56,10 @@ type statsigSigner struct {
 	invalidations    map[string]time.Time
 	generation       uint64
 	refreshes        singleflight.Group
+	localRefreshes   singleflight.Group
+	localMu          sync.Mutex
+	locals           map[string]statsigLocalChallenge
+	fetchLocal       func(context.Context, string, string, *infraegress.Lease) (statsigLocalChallenge, error)
 }
 
 var errStatsigMetaInvalidated = errors.New("Statsig meta refresh invalidated")
@@ -72,13 +76,21 @@ func newStatsigSigner() *statsigSigner {
 		entries:          make(map[string]statsigCacheEntry),
 		recentSignatures: make(map[string]time.Time),
 		invalidations:    make(map[string]time.Time),
+		locals:           make(map[string]statsigLocalChallenge),
+		fetchLocal:       fetchStatsigLocalChallenge,
 	}
 }
 
-func (s *statsigSigner) Sign(ctx context.Context, baseURL, signerURL, token string, lease *infraegress.Lease, method, target string) (string, string, error) {
+func (s *statsigSigner) Sign(ctx context.Context, baseURL, signerURL, token string, lease *infraegress.Lease, method, target string, forceRemoteArgs ...bool) (string, string, error) {
+	forceRemote := len(forceRemoteArgs) > 0 && forceRemoteArgs[0]
 	path, err := statsigSignaturePath(target)
 	if err != nil {
 		return "", "", err
+	}
+	if !forceRemote {
+		if value, localErr := s.localSign(ctx, baseURL, token, lease, method, path); localErr == nil {
+			return value, "local", nil
+		}
 	}
 	for metaAttempt := 0; metaAttempt < statsigMetaAttempts; metaAttempt++ {
 		meta, metaErr := s.meta(ctx, baseURL, token, lease)
@@ -158,6 +170,9 @@ func (s *statsigSigner) Invalidate(baseURL string) {
 		return
 	}
 	delete(s.entries, key)
+	s.localMu.Lock()
+	clear(s.locals) // local entries are keyed by per-lease fingerprints, not base URL.
+	s.localMu.Unlock()
 	s.invalidations[key] = now
 	s.generation++
 	s.mu.Unlock()
@@ -167,6 +182,9 @@ func (s *statsigSigner) Clear() {
 	s.mu.Lock()
 	clear(s.entries)
 	clear(s.invalidations)
+	s.localMu.Lock()
+	clear(s.locals)
+	s.localMu.Unlock()
 	s.generation++
 	s.mu.Unlock()
 }
@@ -392,7 +410,7 @@ func validStatsigID(value string) bool {
 	return err == nil && len(decoded) == 70
 }
 
-func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request, token string, lease *infraegress.Lease) error {
+func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request, token string, lease *infraegress.Lease, forceRemote bool) error {
 	if request == nil {
 		return fmt.Errorf("%w: request is nil", provider.ErrRequestSigning)
 	}
@@ -408,10 +426,10 @@ func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request,
 	if a.statsig == nil {
 		return fmt.Errorf("%w: Statsig signer is unavailable", provider.ErrRequestSigning)
 	}
-	value, source, err := a.statsig.Sign(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, request.Method, request.URL.String())
+	value, source, err := a.statsig.Sign(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, request.Method, request.URL.String(), forceRemote)
 	if err == nil {
 		request.Header.Set("x-statsig-id", value)
-		if source == "meta_refresh" {
+		if source == "meta_refresh" || source == "local" {
 			a.log().Info("web_statsig_meta_refreshed", "method", request.Method, "path", request.URL.EscapedPath())
 		}
 		return nil
