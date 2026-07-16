@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -110,6 +111,21 @@ func TestAffinitySelectionFailsClosedWhenEveryNodeIsConfirmedAntiBot(t *testing.
 	}
 	if selected, ok := manager.selectNode(nodes, "account"); ok {
 		t.Fatalf("selected confirmed anti-bot node %d", selected.ID)
+	}
+}
+
+func TestAcquireFailsClosedWhenEveryNodeIsConfirmedAntiBot(t *testing.T) {
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{
+		{ID: 1, Scope: domain.ScopeWeb, Enabled: true, Health: 1, LastError: "anti-bot rejection"},
+		{ID: 2, Scope: domain.ScopeWeb, Enabled: true, Health: 0.7, LastError: "upstream anti-bot challenge"},
+	}}, nil)
+	lease, err := manager.Acquire(context.Background(), domain.ScopeWeb, "account")
+	if lease != nil {
+		lease.Release()
+		t.Fatal("acquired confirmed anti-bot node")
+	}
+	if err == nil || !strings.Contains(err.Error(), "当前没有可用") {
+		t.Fatalf("Acquire error = %v", err)
 	}
 }
 
