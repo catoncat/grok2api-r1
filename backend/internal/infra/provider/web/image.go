@@ -312,7 +312,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			_ = upstream.Body.Close()
 			responseErr := webResponseErrorFromBody(body)
 			if errors.Is(responseErr, errWebCode7) {
-				if attempt == 0 && a.retryAfterCode7(statsigTarget) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
@@ -320,7 +320,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 				return "", &liteUpstreamError{StatusCode: upstream.StatusCode, Status: upstream.Status, Body: body}
 			}
 			if upstream.StatusCode == http.StatusForbidden {
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
@@ -353,7 +353,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			}
 			status := 0
 			if errors.Is(consumeErr, errWebCode7) {
-				if attempt == 0 && a.retryAfterCode7(statsigTarget) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
@@ -362,7 +362,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			}
 			if errors.Is(consumeErr, errWebAntiBot) {
 				status = http.StatusForbidden
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
@@ -967,7 +967,7 @@ func (a *Adapter) postSignedJSON(ctx context.Context, cfg Config, lease *egress.
 			body, responseErr := peekWebResponseError(response.Body, 1<<20)
 			response.Body = body
 			if errors.Is(responseErr, errWebCode7) {
-				if attempt == 0 && a.retryAfterCode7(endpoint) {
+				if attempt == 0 && a.retryAfterCode7(endpoint, statsigGenerationFromResponse(response)) {
 					_ = response.Body.Close()
 					cancel()
 					continue
@@ -977,7 +977,7 @@ func (a *Adapter) postSignedJSON(ctx context.Context, cfg Config, lease *egress.
 			}
 		}
 		if response.StatusCode == http.StatusForbidden {
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
+			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint, statsigGenerationFromResponse(response)) {
 				_ = response.Body.Close()
 				cancel()
 				continue

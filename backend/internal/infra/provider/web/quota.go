@@ -163,13 +163,13 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 			return account.QuotaWindow{}, err
 		}
 		if errors.Is(webResponseErrorFromBody(body), errWebCode7) {
-			if attempt == 0 && a.retryAfterCode7(endpoint) {
+			if attempt == 0 && a.retryAfterCode7(endpoint, statsigGenerationFromResponse(response)) {
 				continue
 			}
 			return account.QuotaWindow{}, fmt.Errorf("Grok Web 额度接口返回 code 7")
 		}
 		if response.StatusCode == http.StatusForbidden {
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
+			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint, statsigGenerationFromResponse(response)) {
 				continue
 			}
 		}

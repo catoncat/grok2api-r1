@@ -52,6 +52,14 @@ type statsigSignatureEntry struct {
 	seenAt time.Time
 }
 
+type statsigSignedValue struct {
+	value      string
+	source     string
+	generation uint64
+}
+
+type statsigGenerationContextKey struct{}
+
 type statsigSigner struct {
 	client           *http.Client
 	fetchMeta        func(context.Context, string, string, *infraegress.Lease) (string, error)
@@ -84,6 +92,7 @@ func newStatsigSigner() *statsigSigner {
 		entries:          make(map[string]statsigCacheEntry),
 		recentSignatures: make(map[string]time.Time),
 		invalidations:    make(map[string]time.Time),
+		generation:       1,
 		locals:           make(map[string]statsigLocalChallenge),
 		fetchLocal:       fetchStatsigLocalChallenge,
 	}
@@ -91,38 +100,43 @@ func newStatsigSigner() *statsigSigner {
 
 func (s *statsigSigner) Sign(ctx context.Context, baseURL, signerURL, token string, lease *infraegress.Lease, method, target string, forceRemoteArgs ...bool) (string, string, error) {
 	forceRemote := len(forceRemoteArgs) > 0 && forceRemoteArgs[0]
+	signed, err := s.sign(ctx, baseURL, signerURL, token, lease, method, target, forceRemote)
+	return signed.value, signed.source, err
+}
+
+func (s *statsigSigner) sign(ctx context.Context, baseURL, signerURL, token string, lease *infraegress.Lease, method, target string, forceRemote bool) (statsigSignedValue, error) {
 	path, err := statsigSignaturePath(target)
 	if err != nil {
-		return "", "", err
+		return statsigSignedValue{}, err
 	}
 	if !forceRemote {
-		if value, localErr := s.localSign(ctx, baseURL, method, path); localErr == nil {
-			return value, "local", nil
+		if value, generation, localErr := s.localSign(ctx, baseURL, method, path); localErr == nil {
+			return statsigSignedValue{value: value, source: "local", generation: generation}, nil
 		}
 	}
 	for metaAttempt := 0; metaAttempt < statsigMetaAttempts; metaAttempt++ {
 		meta, metaErr := s.meta(ctx, baseURL, token, lease)
 		if metaErr != nil {
-			return "", "", metaErr
+			return statsigSignedValue{}, metaErr
 		}
 		for signAttempt := 0; signAttempt < statsigSignAttempts; signAttempt++ {
 			value, signErr := s.requestSignature(ctx, signerURL, method, path, meta.value)
 			if signErr != nil {
-				return "", "", fmt.Errorf("Statsig 签名失败: %w", signErr)
+				return statsigSignedValue{}, fmt.Errorf("Statsig 签名失败: %w", signErr)
 			}
 			claimed, current := s.claimSignature(value, s.now().UTC(), meta.generation)
 			if !current {
 				break
 			}
 			if claimed {
-				return value, meta.source, nil
+				return statsigSignedValue{value: value, source: meta.source, generation: meta.generation}, nil
 			}
 		}
 		if s.isGenerationCurrent(meta.generation) {
-			return "", "", fmt.Errorf("Statsig 签名服务连续返回重复值")
+			return statsigSignedValue{}, fmt.Errorf("Statsig 签名服务连续返回重复值")
 		}
 	}
-	return "", "", errStatsigMetaInvalidated
+	return statsigSignedValue{}, errStatsigMetaInvalidated
 }
 
 // Warm 在后台构建本地 signer；失败时仍预热远端 meta 作为业务兜底。
@@ -170,18 +184,29 @@ func (s *statsigSigner) meta(ctx context.Context, baseURL, token string, lease *
 }
 
 func (s *statsigSigner) Invalidate(baseURL string) {
+	s.InvalidateGeneration(baseURL, 0)
+}
+
+// InvalidateGeneration drops only the challenge that produced a rejected
+// request. A late code 7 from an older request cannot evict a newer warmup.
+func (s *statsigSigner) InvalidateGeneration(baseURL string, expected uint64) bool {
 	key := statsigMetaKey(baseURL)
 	now := s.now().UTC()
 	s.mu.Lock()
-	if last, ok := s.invalidations[key]; ok && now.Before(last.Add(statsigInvalidateWindow)) {
-		s.mu.Unlock()
-		return
+	defer s.mu.Unlock()
+	if expected != 0 && expected != s.generation {
+		return false
+	}
+	if expected == 0 {
+		if last, ok := s.invalidations[key]; ok && now.Before(last.Add(statsigInvalidateWindow)) {
+			return false
+		}
 	}
 	delete(s.entries, key)
 	clear(s.locals)
 	s.invalidations[key] = now
 	s.generation++
-	s.mu.Unlock()
+	return true
 }
 
 func (s *statsigSigner) Clear() {
@@ -480,16 +505,25 @@ func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request,
 	if a.statsig == nil {
 		return fmt.Errorf("%w: Statsig signer is unavailable", provider.ErrRequestSigning)
 	}
-	value, source, err := a.statsig.Sign(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, request.Method, request.URL.String(), forceRemote)
+	signed, err := a.statsig.sign(ctx, cfg.BaseURL, cfg.StatsigSignerURL, token, lease, request.Method, request.URL.String(), forceRemote)
 	if err == nil {
-		request.Header.Set("x-statsig-id", value)
-		if source == "meta_refresh" {
+		request.Header.Set("x-statsig-id", signed.value)
+		*request = *request.WithContext(context.WithValue(request.Context(), statsigGenerationContextKey{}, signed.generation))
+		if signed.source == "meta_refresh" {
 			a.log().Info("web_statsig_meta_refreshed", "method", request.Method, "path", request.URL.EscapedPath())
 		}
 		return nil
 	}
 	a.log().Warn("web_statsig_fetch_failed", "method", request.Method, "path", request.URL.EscapedPath(), "error", err)
 	return fmt.Errorf("%w: %v", provider.ErrRequestSigning, err)
+}
+
+func statsigGenerationFromResponse(response *http.Response) uint64 {
+	if response == nil || response.Request == nil {
+		return 0
+	}
+	generation, _ := response.Request.Context().Value(statsigGenerationContextKey{}).(uint64)
+	return generation
 }
 
 // WarmStatsig 只使用一个 Web 账号和一个出口租约预热共享 meta，不会逐账号访问上游。
@@ -516,12 +550,17 @@ func (a *Adapter) WarmStatsig(ctx context.Context, credential account.Credential
 	return a.statsig.Warm(ctx, cfg.BaseURL, token, lease)
 }
 
-func (a *Adapter) invalidateSignedStatsig(method, target string) bool {
+func (a *Adapter) invalidateSignedStatsig(method, target string, generations ...uint64) bool {
 	cfg := a.config()
 	if cfg.StatsigMode == "url" && a.statsig != nil {
-		a.statsig.Invalidate(cfg.BaseURL)
-		if parsed, err := url.Parse(target); err == nil {
-			a.log().Info("web_statsig_invalidated", "method", method, "path", parsed.EscapedPath())
+		expected := uint64(0)
+		if len(generations) > 0 {
+			expected = generations[0]
+		}
+		if a.statsig.InvalidateGeneration(cfg.BaseURL, expected) {
+			if parsed, err := url.Parse(target); err == nil {
+				a.log().Info("web_statsig_invalidated", "method", method, "path", parsed.EscapedPath())
+			}
 		}
 		return true
 	}

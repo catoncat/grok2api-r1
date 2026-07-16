@@ -139,6 +139,61 @@ func TestStatsigRecentSignatureCapacityFailsClosed(t *testing.T) {
 	}
 }
 
+func TestStatsigGenerationScopedInvalidationRejectsLateCode7(t *testing.T) {
+	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
+	signer := newStatsigSigner()
+	signer.now = func() time.Time { return now }
+	key := localStatsigKey("https://grok.example")
+	firstGeneration := signer.currentGeneration()
+	first := statsigLocalChallenge{seed: "first", engine: testStatsigLocalEngine(testStatsigID(61)), expiresAt: now.Add(time.Hour)}
+	if !signer.storeLocalIfGeneration(key, first, now, firstGeneration) {
+		t.Fatal("first challenge was not stored")
+	}
+	if !signer.InvalidateGeneration("https://grok.example", firstGeneration) {
+		t.Fatal("current generation was not invalidated")
+	}
+
+	secondGeneration := signer.currentGeneration()
+	second := statsigLocalChallenge{seed: "second", engine: testStatsigLocalEngine(testStatsigID(62)), expiresAt: now.Add(time.Hour)}
+	if !signer.storeLocalIfGeneration(key, second, now, secondGeneration) {
+		t.Fatal("second challenge was not stored")
+	}
+	if signer.InvalidateGeneration("https://grok.example", firstGeneration) {
+		t.Fatal("late code 7 invalidated a newer generation")
+	}
+	if cached, generation, ok := signer.cachedLocal(key, now); !ok || generation != secondGeneration || cached.seed != "second" {
+		t.Fatalf("new challenge survived=%t generation=%d seed=%q", ok, generation, cached.seed)
+	}
+	if !signer.InvalidateGeneration("https://grok.example", secondGeneration) {
+		t.Fatal("current code 7 was suppressed by invalidation window")
+	}
+	if _, _, ok := signer.cachedLocal(key, now); ok {
+		t.Fatal("current rejected challenge remained cached")
+	}
+}
+
+func TestApplySignedStatsigTagsRequestGeneration(t *testing.T) {
+	signer := newStatsigSigner()
+	signer.fetchLocal = func(context.Context, string, string, *infraegress.Lease) (statsigLocalChallenge, error) {
+		return statsigLocalChallenge{seed: "seed", curves: "[]", engine: testStatsigLocalEngine(testStatsigID(63))}, nil
+	}
+	if warmed, err := signer.Warm(context.Background(), "https://grok.example", "token", &infraegress.Lease{NodeID: 1}); err != nil || warmed != 1 {
+		t.Fatalf("warmed=%d err=%v", warmed, err)
+	}
+	adapter := &Adapter{cfg: Config{BaseURL: "https://grok.example", StatsigMode: "url", StatsigSignerURL: "https://signer.example/sign"}, statsig: signer}
+	request, err := http.NewRequest(http.MethodPost, "https://grok.example/rest/test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.applySignedStatsig(context.Background(), request, "token", &infraegress.Lease{NodeID: 2}, false); err != nil {
+		t.Fatal(err)
+	}
+	generation := statsigGenerationFromResponse(&http.Response{Request: request})
+	if generation == 0 || generation != signer.currentGeneration() {
+		t.Fatalf("request generation=%d current=%d", generation, signer.currentGeneration())
+	}
+}
+
 func testStatsigLocalEngine(values ...string) *statsigEngine {
 	encoded, _ := json.Marshal(values)
 	source := `var __testValues=` + string(encoded) + `;var __testIndex=0;TURBOPACK.push([[],{},function(c){c.s("default",function(){return function(){var i=Math.min(__testIndex++,__testValues.length-1);return Promise.resolve(__testValues[i])}})}]);`

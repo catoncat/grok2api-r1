@@ -74,34 +74,37 @@ func localStatsigKey(base string) string {
 	return statsigMetaKey(base)
 }
 
-func (s *statsigSigner) localSign(ctx context.Context, base, method, path string) (string, error) {
+func (s *statsigSigner) localSign(ctx context.Context, base, method, path string) (string, uint64, error) {
 	key := localStatsigKey(base)
 	ch, generation, ok := s.cachedLocal(key, s.now())
 	if !ok {
-		return "", errStatsigLocalCold
+		return "", generation, errStatsigLocalCold
 	}
 	for attempt := 0; attempt < statsigLocalSignAttempts; attempt++ {
 		id, err := ch.engine.signID(ctx, ch.seed, ch.curves, method, path)
 		if err != nil {
 			s.dropLocalIfGeneration(key, generation)
-			return "", err
+			return "", generation, err
 		}
 		claimed, current := s.claimSignature(id, s.now().UTC(), generation)
 		if !current {
-			return "", errStatsigMetaInvalidated
+			return "", generation, errStatsigMetaInvalidated
 		}
 		if claimed {
-			return id, nil
+			return id, generation, nil
+		}
+		if attempt+1 == statsigLocalSignAttempts {
+			break
 		}
 		timer := time.NewTimer(statsigLocalRetryDelay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return "", ctx.Err()
+			return "", generation, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return "", errors.New("local Statsig produced duplicate IDs")
+	return "", generation, errors.New("local Statsig produced duplicate IDs")
 }
 
 func (s *statsigSigner) warmLocal(ctx context.Context, base, token string, lease *infraegress.Lease) error {
