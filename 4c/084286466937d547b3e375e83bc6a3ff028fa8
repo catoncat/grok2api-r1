@@ -1,0 +1,25 @@
+backend/internal/infra/provider/web/statsig_test.go
+  s_66f58e62c51c03::t_e4d5cbd9f4facd 22,712-744
+  s_66f58e62c51c03::t_077af1d78d1fbc 5,12,580-711
+  s_66f58e62c51c03::t_7eef92e967d6c1 19
+backend/internal/infra/provider/web/statsig.go
+  s_66f58e62c51c03::t_41afcd7b988f35 6-7,15,38-45,48,409-426,431-448,462-465,481,490,492
+  s_66f58e62c51c03::t_a03e8e021b32ec 46-47,427-430
+  s_66f58e62c51c03::t_f69e71401ad85e 491
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4c084286466937d547b3e375e83bc6a3ff028fa8",
+  "prompts": {},
+  "sessions": {
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
