@@ -41,13 +41,17 @@ const (
 	statsigCurvesPerGroupMax = 64
 	statsigLocalSignAttempts = 16
 	statsigLocalRetryDelay   = time.Millisecond
+	statsigDiscoveryTimeout  = 20 * time.Second
+	statsigSignerSourceBytes = 256 << 10
+	statsigBuildTTL          = statsigCacheTTL
+	statsigBuildMaxEntries   = 16
 )
 
 var (
 	statsigChunkPath    = regexp.MustCompile(`(?:/_next/)?static/chunks/[A-Za-z0-9_.~/-]+\.js`)
 	statsigSourceMap    = regexp.MustCompile(`(?m)//[#@]\s*sourceMappingURL=\S*`)
 	statsigBuildMu      sync.Mutex
-	statsigBuilds       = make(map[string]*statsigEngine)
+	statsigBuilds       = make(map[string]statsigBuildEntry)
 	statsigBuildRefresh singleflight.Group
 )
 
@@ -65,9 +69,31 @@ type statsigEngine struct {
 	created int
 }
 
+type statsigBuildEntry struct {
+	engine    *statsigEngine
+	expiresAt time.Time
+	lastUsed  time.Time
+}
+
 type statsigRuntime struct {
 	rt   *goja.Runtime
 	sign goja.Callable
+}
+
+type statsigDiscoveryLimits struct {
+	ChunkLimit int
+	ChunkBytes int
+	TotalBytes int
+	Workers    int
+	Timeout    time.Duration
+}
+
+var defaultStatsigDiscoveryLimits = statsigDiscoveryLimits{
+	ChunkLimit: statsigChunkLimit,
+	ChunkBytes: statsigChunkBytes,
+	TotalBytes: statsigTotalBytes,
+	Workers:    statsigWorkers,
+	Timeout:    statsigDiscoveryTimeout,
 }
 
 func localStatsigKey(base string) string {
@@ -159,27 +185,18 @@ func fetchStatsigLocalChallenge(ctx context.Context, base, token string, lease *
 		return statsigLocalChallenge{}, err
 	}
 	curvesJSON, _ := json.Marshal(curves)
-	build := statsigBuildKey(home)
-	statsigBuildMu.Lock()
-	engine := statsigBuilds[build]
-	statsigBuildMu.Unlock()
-	var scanned, bytesRead int
-	if engine == nil {
+	build := statsigBuildKey(base, home)
+	engine, ok := loadStatsigBuild(build, time.Now().UTC())
+	if !ok {
 		value, discoverErr, _ := statsigBuildRefresh.Do(build, func() (any, error) {
-			statsigBuildMu.Lock()
-			cached := statsigBuilds[build]
-			statsigBuildMu.Unlock()
-			if cached != nil {
+			if cached, cachedOK := loadStatsigBuild(build, time.Now().UTC()); cachedOK {
 				return cached, nil
 			}
-			found, count, bytes, err := discoverStatsigEngine(ctx, base, home, seed, string(curvesJSON), decoded)
-			scanned, bytesRead = count, bytes
+			found, _, _, err := discoverStatsigEngine(ctx, base, home, seed, string(curvesJSON), decoded)
 			if err != nil {
 				return nil, err
 			}
-			statsigBuildMu.Lock()
-			statsigBuilds[build] = found
-			statsigBuildMu.Unlock()
+			storeStatsigBuild(build, found, time.Now().UTC())
 			return found, nil
 		})
 		if discoverErr != nil {
@@ -187,19 +204,56 @@ func fetchStatsigLocalChallenge(ctx context.Context, base, token string, lease *
 		}
 		engine = value.(*statsigEngine)
 	}
-	_ = scanned
-	_ = bytesRead // logging occurs only after a working engine is installed.
 	return statsigLocalChallenge{seed: seed, curves: string(curvesJSON), engine: engine}, nil
 }
 
-func statsigBuildKey(home string) string {
+func statsigBuildKey(base, home string) string {
 	paths := statsigChunkPaths(home, nil)
 	h := sha256.New()
+	_, _ = io.WriteString(h, statsigMetaKey(base))
+	_, _ = io.WriteString(h, "\n")
 	for _, path := range paths {
 		_, _ = io.WriteString(h, path)
 		_, _ = io.WriteString(h, "\n")
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func loadStatsigBuild(key string, now time.Time) (*statsigEngine, bool) {
+	statsigBuildMu.Lock()
+	defer statsigBuildMu.Unlock()
+	entry, ok := statsigBuilds[key]
+	if !ok || entry.engine == nil || !now.Before(entry.expiresAt) {
+		delete(statsigBuilds, key)
+		return nil, false
+	}
+	entry.lastUsed = now
+	statsigBuilds[key] = entry
+	return entry.engine, true
+}
+
+func storeStatsigBuild(key string, engine *statsigEngine, now time.Time) {
+	if key == "" || engine == nil {
+		return
+	}
+	statsigBuildMu.Lock()
+	defer statsigBuildMu.Unlock()
+	for existingKey, entry := range statsigBuilds {
+		if entry.engine == nil || !now.Before(entry.expiresAt) {
+			delete(statsigBuilds, existingKey)
+		}
+	}
+	if _, exists := statsigBuilds[key]; !exists && len(statsigBuilds) >= statsigBuildMaxEntries {
+		oldestKey := ""
+		var oldestUsed time.Time
+		for existingKey, entry := range statsigBuilds {
+			if oldestKey == "" || entry.lastUsed.Before(oldestUsed) || (entry.lastUsed.Equal(oldestUsed) && existingKey < oldestKey) {
+				oldestKey, oldestUsed = existingKey, entry.lastUsed
+			}
+		}
+		delete(statsigBuilds, oldestKey)
+	}
+	statsigBuilds[key] = statsigBuildEntry{engine: engine, expiresAt: now.Add(statsigBuildTTL), lastUsed: now}
 }
 
 func fetchStatsigHome(ctx context.Context, base, token string, lease *infraegress.Lease) (string, error) {
@@ -234,45 +288,90 @@ func fetchStatsigHome(ctx context.Context, base, token string, lease *infraegres
 }
 
 func discoverStatsigEngine(ctx context.Context, base, home, seed, curves string, decoded []byte) (*statsigEngine, int, int, error) {
+	return discoverStatsigEngineWithLimits(ctx, base, home, seed, curves, decoded, defaultStatsigDiscoveryLimits)
+}
+
+type statsigChunkResult struct {
+	path  string
+	body  []byte
+	bytes int
+	err   error
+}
+
+func discoverStatsigEngineWithLimits(ctx context.Context, base, home, seed, curves string, decoded []byte, limits statsigDiscoveryLimits) (*statsigEngine, int, int, error) {
+	if limits.ChunkLimit <= 0 || limits.ChunkBytes <= 0 || limits.TotalBytes <= 0 || limits.Workers <= 0 || limits.Timeout <= 0 {
+		return nil, 0, 0, errors.New("invalid Statsig discovery limits")
+	}
 	paths := statsigChunkPaths(home, nil)
 	if len(paths) == 0 {
 		return nil, 0, 0, errors.New("no Statsig chunks")
 	}
-	client := &http.Client{Timeout: 12 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
-	seen := make(map[string]bool)
-	queue := append([]string(nil), paths...)
-	scanned, total := 0, 0
-	for len(queue) > 0 && scanned < statsigChunkLimit && total < statsigTotalBytes {
-		path := queue[0]
-		queue = queue[1:]
-		if seen[path] {
+	discoveryCtx, cancel := context.WithTimeout(ctx, limits.Timeout)
+	defer cancel()
+	requestTimeout := min(12*time.Second, limits.Timeout)
+	client := &http.Client{Timeout: requestTimeout, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	seen := make(map[string]bool, min(len(paths), limits.ChunkLimit))
+	queue := make([]string, 0, min(len(paths), limits.ChunkLimit))
+	for _, path := range paths {
+		if seen[path] || len(seen) >= limits.ChunkLimit {
 			continue
 		}
 		seen[path] = true
-		body, err := fetchStatsigChunk(ctx, client, base, path, statsigChunkBytes)
-		if err != nil {
-			continue
+		queue = append(queue, path)
+	}
+	attempts, total := 0, 0
+	for len(queue) > 0 && attempts < limits.ChunkLimit && total < limits.TotalBytes && discoveryCtx.Err() == nil {
+		batchSize := min(limits.Workers, len(queue), limits.ChunkLimit-attempts, limits.TotalBytes-total)
+		batch := append([]string(nil), queue[:batchSize]...)
+		queue = queue[batchSize:]
+		results := make([]statsigChunkResult, batchSize)
+		remainingBytes := limits.TotalBytes - total
+		var wait sync.WaitGroup
+		for index, path := range batch {
+			slotsLeft := batchSize - index
+			budget := min(limits.ChunkBytes, remainingBytes-(slotsLeft-1))
+			remainingBytes -= budget
+			wait.Add(1)
+			go func(index int, path string, budget int) {
+				defer wait.Done()
+				body, bytesRead, err := fetchStatsigChunkMeasured(discoveryCtx, client, base, path, budget)
+				results[index] = statsigChunkResult{path: path, body: body, bytes: bytesRead, err: err}
+			}(index, path, budget)
 		}
-		scanned++
-		total += len(body)
-		if engine, ok := verifyStatsigChunk(ctx, string(body), seed, curves, decoded); ok {
-			return engine, scanned, total, nil
-		}
-		for _, next := range statsigChunkPaths(string(body), seen) {
-			if len(seen)+len(queue) < statsigChunkLimit {
+		attempts += batchSize
+		wait.Wait()
+		for _, result := range results {
+			total += result.bytes
+			if result.err != nil {
+				continue
+			}
+			if engine, ok := verifyStatsigChunk(discoveryCtx, string(result.body), seed, curves, decoded); ok {
+				cancel()
+				return engine, attempts, total, nil
+			}
+			for _, next := range statsigChunkPaths(string(result.body), seen) {
+				if seen[next] || len(seen) >= limits.ChunkLimit {
+					continue
+				}
+				seen[next] = true
 				queue = append(queue, next)
 			}
 		}
 	}
-	return nil, scanned, total, fmt.Errorf("Statsig signer not found after %d chunks/%d bytes", scanned, total)
+	if err := discoveryCtx.Err(); err != nil {
+		return nil, attempts, total, fmt.Errorf("Statsig discovery stopped after %d attempts/%d bytes: %w", attempts, total, err)
+	}
+	return nil, attempts, total, fmt.Errorf("Statsig signer not found after %d attempts/%d bytes", attempts, total)
 }
 
 func statsigChunkPaths(source string, seen map[string]bool) []string {
 	values := statsigChunkPath.FindAllString(source, -1)
 	out := make([]string, 0, len(values))
+	added := make(map[string]bool, len(values))
 	for _, value := range values {
 		value = "/_next/" + strings.TrimPrefix(value, "/_next/")
-		if seen == nil || !seen[value] {
+		if !added[value] && (seen == nil || !seen[value]) {
+			added[value] = true
 			out = append(out, value)
 		}
 	}
@@ -389,45 +488,51 @@ func validateStatsigCurves(raw []byte) (json.RawMessage, error) {
 }
 
 func fetchStatsigChunk(ctx context.Context, client *http.Client, base, path string, limit int) ([]byte, error) {
+	body, _, err := fetchStatsigChunkMeasured(ctx, client, base, path, limit)
+	return body, err
+}
+
+func fetchStatsigChunkMeasured(ctx context.Context, client *http.Client, base, path string, limit int) ([]byte, int, error) {
 	origin, err := url.Parse(base)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if origin.Scheme != "https" && origin.Scheme != "http" {
-		return nil, errors.New("invalid chunk origin")
+		return nil, 0, errors.New("invalid chunk origin")
 	}
 	if !strings.HasPrefix(path, "/_next/static/chunks/") || strings.Contains(path, "..") {
-		return nil, errors.New("chunk path outside allowlist")
+		return nil, 0, errors.New("chunk path outside allowlist")
 	}
 	u := origin.ResolveReference(&url.URL{Path: path})
 	if u.Scheme != origin.Scheme || u.Host != origin.Host || u.User != nil || u.RawQuery != "" || !strings.HasPrefix(u.EscapedPath(), "/_next/static/chunks/") {
-		return nil, errors.New("cross-origin chunk")
+		return nil, 0, errors.New("cross-origin chunk")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	// Deliberately no Cookie, Authorization, or Cloudflare session headers.
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("chunk returned %d", resp.StatusCode)
-	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 	if err != nil {
-		return nil, err
+		return nil, min(len(body), limit), err
 	}
+	bytesRead := min(len(body), limit)
 	if len(body) > limit {
-		return nil, errors.New("chunk exceeds limit")
+		return nil, bytesRead, errors.New("chunk exceeds limit")
 	}
-	return body, nil
+	if resp.StatusCode != http.StatusOK {
+		return nil, bytesRead, fmt.Errorf("chunk returned %d", resp.StatusCode)
+	}
+	return body, bytesRead, nil
 }
 
 func verifyStatsigChunk(ctx context.Context, source, seed, curves string, decoded []byte) (*statsigEngine, bool) {
-	if !strings.Contains(source, "String.fromCharCode") || !strings.Contains(source, "charCodeAt") {
+	if len(source) > statsigSignerSourceBytes || !strings.Contains(source, "String.fromCharCode") || !strings.Contains(source, "charCodeAt") {
 		return nil, false
 	}
 	engine := &statsigEngine{source: statsigSourceMap.ReplaceAllString(source, ""), pool: make(chan *statsigRuntime, statsigRuntimeMax)}
