@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -603,8 +602,8 @@ attemptLoop:
 		}
 		responseRetryable := isRetryableResponse(response)
 		if !responseRetryable && credential.Provider == accountdomain.ProviderBuild && response.StatusCode == http.StatusForbidden {
-			body, readErr := readRetryableBody(response.Body)
-			response.Body = io.NopCloser(bytes.NewReader(body))
+			body, replay, _, readErr := readResponseBody(response.Body)
+			response.Body = replay
 			if readErr == nil {
 				terminalFailure := newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)
 				if terminalFailure.ModelPermissionDenied {

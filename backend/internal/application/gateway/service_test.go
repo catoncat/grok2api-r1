@@ -867,7 +867,10 @@ func TestGatewayCoolsOnlyBuildModelForRetryableAndTerminalPermissionDenials(t *t
 	if err != nil || terminal.StatusCode != http.StatusForbidden {
 		t.Fatalf("terminal response = %#v, err = %v", terminal, err)
 	}
-	_, _ = io.Copy(io.Discard, terminal.Body)
+	terminalBody, err := io.ReadAll(terminal.Body)
+	if err != nil || string(terminalBody) != terminalPermissionDeniedBody {
+		t.Fatalf("terminal body = %q, err = %v", terminalBody, err)
+	}
 	terminal.Finalize(Usage{}, "", "upstream_forbidden")
 	_ = terminal.Body.Close()
 	if adapter.refreshes.Load() != 1 {
@@ -892,6 +895,25 @@ func TestGatewayCoolsOnlyBuildModelForRetryableAndTerminalPermissionDenials(t *t
 	_ = result.Body.Close()
 	if string(body) != "ok" {
 		t.Fatalf("allowed model body = %q", body)
+	}
+}
+
+func TestInspectResponseBodyPreservesContentBeyondClassificationPrefix(t *testing.T) {
+	want := terminalPermissionDeniedBody + strings.Repeat("x", diagnosticBodyLimit)
+	prefix, replay, truncated, err := readResponseBody(io.NopCloser(strings.NewReader(want)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(prefix) != diagnosticBodyLimit || string(prefix) != want[:diagnosticBodyLimit] {
+		t.Fatalf("inspection prefix length = %d", len(prefix))
+	}
+	got, err := io.ReadAll(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = replay.Close()
+	if string(got) != want {
+		t.Fatalf("replayed body length = %d, want %d", len(got), len(want))
 	}
 }
 
@@ -1503,6 +1525,8 @@ type authRescueAdapter struct {
 	permissionDeniedModel    string
 }
 
+const terminalPermissionDeniedBody = `{"code":"permission-denied","error":"Access to the chat endpoint is denied. Please update the permissions."}`
+
 func (a *authRescueAdapter) Provider() account.Provider { return account.ProviderBuild }
 func (a *authRescueAdapter) Definition() provider.Definition {
 	return testConversationDefinition(account.ProviderBuild)
@@ -1520,7 +1544,7 @@ func (a *authRescueAdapter) ForwardResponse(_ context.Context, request provider.
 		body := `{"error":{"code":"permission_denied","message":"Access to the chat endpoint is denied"}}`
 		if a.terminalPermissionDenied.Load() && request.Model == a.permissionDeniedModel {
 			header.Set("X-Should-Retry", "false")
-			body = `{"code":"permission-denied","error":"Access to the chat endpoint is denied. Please update the permissions."}`
+			body = terminalPermissionDeniedBody
 		}
 		return &provider.Response{
 			StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: header,
