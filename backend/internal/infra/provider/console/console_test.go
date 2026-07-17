@@ -141,19 +141,96 @@ func TestNormalizeRequestAppliesConsoleContract(t *testing.T) {
 		t.Fatalf("max_output_tokens = %#v", payload["max_output_tokens"])
 	}
 	reasoning, _ := payload["reasoning"].(map[string]any)
-	if reasoning["effort"] != "high" {
+	if reasoning["effort"] != "xhigh" {
 		t.Fatalf("reasoning = %#v", reasoning)
+	}
+	include, _ := payload["include"].([]any)
+	if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("include = %#v", include)
 	}
 	tools, _ := payload["tools"].([]any)
 	if len(tools) != 3 || toolIdentity(tools[0]) != "web_search" || toolIdentity(tools[1]) != "x_search" || toolIdentity(tools[2]) != "function:lookup" {
 		t.Fatalf("tools = %#v", tools)
 	}
-	for _, body := range []string{
-		`{"model":"grok-4.3","store":true,"input":"hello"}`,
-		`{"model":"grok-4.3","previous_response_id":"resp_1","input":"hello"}`,
+	webSearch, _ := tools[0].(map[string]any)
+	if webSearch["custom"] != nil || webSearch["enable_image_understanding"] != true {
+		t.Fatalf("web_search = %#v", webSearch)
+	}
+	stateless, err := normalizeRequest([]byte(`{"model":"grok-4.3","store":true,"previous_response_id":"resp_1","service_tier":"priority","input":"hello"}`), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statelessPayload map[string]any
+	if json.Unmarshal(stateless, &statelessPayload) != nil || statelessPayload["store"] != false || statelessPayload["previous_response_id"] != nil || statelessPayload["service_tier"] != nil {
+		t.Fatalf("stateless payload = %#v", statelessPayload)
+	}
+}
+
+func TestNormalizeRequestAppliesConsoleCompatibilityBoundary(t *testing.T) {
+	spec, ok := Resolve("grok-4.20-0309")
+	if !ok {
+		t.Fatal("grok-4.20-0309 missing")
+	}
+	body, err := normalizeRequest([]byte(`{
+		"model":"public",
+		"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object"}}},
+		"input":[
+			{"type":"reasoning","content":[{"text":"prior thought"}]},
+			{"type":"message","role":"user","content":[
+				{"type":"output_text","text":"hello"},
+				{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}
+			]}
+		],
+		"tools":[
+			{"type":"namespace","name":"crm","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]},
+			{"type":"web_search","external_web_access":true}
+		],
+		"tool_choice":"required"
+	}`), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["response_format"] != nil || payload["reasoning"] != nil || payload["tool_choice"] != "auto" {
+		t.Fatalf("payload boundary = %#v", payload)
+	}
+	include, _ := payload["include"].([]any)
+	if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("include = %#v", include)
+	}
+	text, _ := payload["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	if format["type"] != "json_schema" || format["name"] != "answer" || format["json_schema"] != nil {
+		t.Fatalf("text.format = %#v", format)
+	}
+	input, _ := payload["input"].([]any)
+	reasoning := input[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if reasoning["type"] != "reasoning_text" {
+		t.Fatalf("reasoning content = %#v", reasoning)
+	}
+	parts := input[1].(map[string]any)["content"].([]any)
+	if parts[0].(map[string]any)["type"] != "input_text" || parts[1].(map[string]any)["type"] != "input_image" || parts[1].(map[string]any)["image_url"] != "https://example.com/image.png" {
+		t.Fatalf("message parts = %#v", parts)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 || toolIdentity(tools[0]) != "web_search" || toolIdentity(tools[1]) != "x_search" {
+		t.Fatalf("sanitized tools = %#v", tools)
+	}
+	if tools[0].(map[string]any)["external_web_access"] != nil {
+		t.Fatalf("unsupported web search controls leaked: %#v", tools[0])
+	}
+}
+
+func TestNormalizeReasoningPreservesReferenceEfforts(t *testing.T) {
+	for input, want := range map[string]string{
+		"none": "none", "minimal": "low", "low": "low", "medium": "medium",
+		"high": "high", "xhigh": "xhigh", "max": "xhigh",
 	} {
-		if _, err := normalizeRequest([]byte(body), spec); err == nil {
-			t.Fatalf("expected stateless validation error for %s", body)
+		if got := normalizeEffort(input); got != want {
+			t.Fatalf("normalizeEffort(%q) = %q, want %q", input, got, want)
 		}
 	}
 }
@@ -222,14 +299,39 @@ func TestNormalizeRequestRejectsHostedChoiceReplacedBySameNamedFunction(t *testi
 	if !ok {
 		t.Fatal("grok-4.3 missing")
 	}
-	_, err := normalizeRequest([]byte(`{
+	for _, choice := range []string{`{"type":"web_search"}`, `"web_search"`} {
+		_, err := normalizeRequest([]byte(`{
+			"model":"grok-4.3",
+			"input":"search",
+			"tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}],
+			"tool_choice":`+choice+`
+		}`), spec)
+		if err == nil || !strings.Contains(err.Error(), "tool_choice") {
+			t.Fatalf("choice %s: error = %v", choice, err)
+		}
+	}
+}
+
+func TestNormalizeRequestKeepsUnsupportedToolChoiceCompatibilityFallback(t *testing.T) {
+	spec, ok := Resolve("grok-4.3")
+	if !ok {
+		t.Fatal("grok-4.3 missing")
+	}
+	body, err := normalizeRequest([]byte(`{
 		"model":"grok-4.3",
 		"input":"search",
-		"tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}],
-		"tool_choice":{"type":"web_search"}
+		"tools":[{"type":"tool_search"}],
+		"tool_choice":{"type":"tool_search"}
 	}`), spec)
-	if err == nil || !strings.Contains(err.Error(), "tool_choice") {
-		t.Fatalf("error = %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %#v", payload["tool_choice"])
 	}
 }
 
@@ -241,12 +343,15 @@ func TestConsoleImportAcceptsJSONPlainTextAndCookieFormat(t *testing.T) {
 	if len(values) != 2 || values[0].AccessToken != "token-one" || values[1].AccessToken != "token-two" {
 		t.Fatalf("plain values = %#v", values)
 	}
-	values, err = parseImportedCredentials([]byte(`{"provider":"grok_console","accounts":[{"name":"console-a","team_id":"team-a","sso_token":"token-a"}]}`))
+	values, err = parseImportedCredentials([]byte(`{"provider":"grok_console","accounts":[{"name":"console-a","team_id":"team-a","sso_token":"token-a","cloudflare_cookies":"cf_clearance=abc"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(values) != 1 || values[0].Provider != account.ProviderConsole || values[0].AuthType != account.AuthTypeSSO || values[0].Name != "console-a" || values[0].TeamID != "team-a" || values[0].AccessToken != "token-a" {
 		t.Fatalf("json values = %#v", values)
+	}
+	if values[0].CloudflareCookies != "cf_clearance=abc" {
+		t.Fatalf("cloudflare cookies = %q", values[0].CloudflareCookies)
 	}
 }
 
@@ -346,7 +451,7 @@ func TestAdapterForwardsConsoleHeadersAndNormalizedBody(t *testing.T) {
 		if request.URL.Path != "/v1/responses" || request.Method != http.MethodPost {
 			t.Errorf("request = %s %s", request.Method, request.URL.Path)
 		}
-		if request.Header.Get("Authorization") != "Bearer anonymous" || request.Header.Get("x-cluster") != "https://us-east-1.api.x.ai" {
+		if request.Header.Get("Authorization") != "Bearer anonymous" || request.Header.Get("x-cluster") != "https://us-east-1.api.x.ai" || request.Header.Get("Accept") != "*/*" || request.Header.Get("Priority") != "u=1, i" {
 			t.Errorf("headers = %#v", request.Header)
 		}
 		cookie := request.Header.Get("Cookie")
@@ -382,6 +487,88 @@ func TestAdapterForwardsConsoleHeadersAndNormalizedBody(t *testing.T) {
 	}
 	if received["model"] != "grok-4.3" || received["store"] != false || received["metadata"] != nil {
 		t.Fatalf("received = %#v", received)
+	}
+}
+
+func TestAdapterForwardsOnlyOneSearchToolPerUpstreamName(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		operation string
+		body      string
+	}{
+		{
+			name: "responses from Pi", operation: conversation.OperationResponses,
+			body: `{"model":"grok-4.3","input":"hello","tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}]}`,
+		},
+		{
+			name: "chat compatibility", operation: conversation.OperationChat,
+			body: `{"model":"grok-4.3","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"web_search","parameters":{"type":"object"}}}]}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var received map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(writer, `{"id":"resp_console","object":"response","status":"completed","output":[]}`)
+			}))
+			defer server.Close()
+
+			adapter, credential := newConsoleTestAdapter(t, server.URL)
+			response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
+				Credential: credential, Method: http.MethodPost, Path: "/responses", Model: "grok-4.3",
+				Operation: test.operation, NormalizeBody: true, Body: []byte(test.body),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+
+			tools, _ := received["tools"].([]any)
+			if len(tools) != 2 || toolIdentity(tools[0]) != "function:web_search" || toolIdentity(tools[1]) != "x_search" {
+				t.Fatalf("upstream tools = %#v", tools)
+			}
+			names := make(map[string]bool)
+			for _, tool := range tools {
+				name := toolUpstreamName(tool)
+				if names[name] {
+					t.Fatalf("duplicate upstream tool name %q in %#v", name, tools)
+				}
+				names[name] = true
+			}
+		})
+	}
+}
+
+func TestAdapterRejectsHostedChoiceReplacedBySameNamedFunctionBeforeUpstream(t *testing.T) {
+	upstreamCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	adapter, credential := newConsoleTestAdapter(t, server.URL)
+
+	for _, choice := range []string{`{"type":"web_search"}`, `"web_search"`} {
+		response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
+			Credential: credential, Method: http.MethodPost, Path: "/responses", Model: "grok-4.3",
+			Operation: conversation.OperationResponses, NormalizeBody: true,
+			Body: []byte(`{"model":"grok-4.3","input":"hello","tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}],"tool_choice":` + choice + `}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("choice %s: status = %d", choice, response.StatusCode)
+		}
+	}
+	if upstreamCalls != 0 {
+		t.Fatalf("upstream calls = %d", upstreamCalls)
 	}
 }
 

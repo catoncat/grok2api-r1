@@ -21,10 +21,11 @@ type importDocument struct {
 }
 
 type importEntry struct {
-	Name     string `json:"name"`
-	TeamID   string `json:"team_id,omitempty"`
-	SSOToken string `json:"sso_token"`
-	Token    string `json:"token"`
+	Name              string `json:"name"`
+	TeamID            string `json:"team_id,omitempty"`
+	SSOToken          string `json:"sso_token"`
+	Token             string `json:"token"`
+	CloudflareCookies string `json:"cloudflare_cookies"`
 }
 
 func parseImportedCredentials(data []byte) ([]provider.CredentialSeed, error) {
@@ -72,6 +73,7 @@ func parseImportedCredentials(data []byte) ([]provider.CredentialSeed, error) {
 		}
 		seed := credentialSeed(name, token)
 		seed.TeamID = teamID
+		seed.CloudflareCookies = entry.CloudflareCookies
 		result = append(result, seed)
 	}
 	return result, nil

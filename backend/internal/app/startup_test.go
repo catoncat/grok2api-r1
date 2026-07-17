@@ -61,7 +61,7 @@ func TestReadinessKeepsBuildReadyWhenWebIsUnavailable(t *testing.T) {
 	state := newStartupState(0)
 	state.setPhase("running")
 	state.setStatsig("unavailable", "test", 0)
-	snapshot := readinessSnapshot(ctx, state, func(context.Context) error { return nil }, models, accounts, provider.NewRegistry())
+	snapshot := readinessSnapshot(ctx, state, func(context.Context) error { return nil }, func(context.Context) error { return nil }, models, accounts, provider.NewRegistry())
 	if !snapshot.Ready || snapshot.State != "degraded" {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
@@ -100,8 +100,33 @@ func TestReadinessRestoresPersistedCooldownWithoutUpstreamProbe(t *testing.T) {
 	}
 	state := newStartupState(0)
 	state.setPhase("running")
-	snapshot := readinessSnapshot(ctx, state, func(context.Context) error { return nil }, models, accounts, provider.NewRegistry())
+	snapshot := readinessSnapshot(ctx, state, func(context.Context) error { return nil }, func(context.Context) error { return nil }, models, accounts, provider.NewRegistry())
 	if snapshot.Ready || snapshot.State != "not_ready" || snapshot.Components["grok_build"].State != "unavailable" {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestReadinessRejectsUnavailableMediaStoreWithoutLeakingError(t *testing.T) {
+	state := newStartupState(0)
+	state.setPhase("running")
+	snapshot := readinessSnapshot(
+		context.Background(), state,
+		func(context.Context) error { return nil },
+		func(context.Context) error { return errors.New("secret://cos-internal") },
+		nil, nil, nil,
+	)
+	if snapshot.Ready || snapshot.State != "not_ready" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	component := snapshot.Components["media_store"]
+	if component.State != "unavailable" || component.Detail != "媒体存储不可用" {
+		t.Fatalf("media component = %#v", component)
+	}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "cos-internal") {
+		t.Fatalf("public readiness leaked media error: %s", payload)
 	}
 }

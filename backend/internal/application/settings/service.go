@@ -251,7 +251,7 @@ func (s *Service) ReloadPersisted(ctx context.Context) error {
 }
 
 func applyDomainConfig(base config.Config, value settingsdomain.Config) config.Config {
-	// Legacy runtime_settings rows predate Server; zero must not wipe yaml/defaults.
+	// 旧版运行设置没有 Server 字段，反序列化后为零；升级时沿用当前配置默认值。
 	if value.Server.MaxConcurrentRequests > 0 {
 		base.Server.MaxConcurrentRequests = value.Server.MaxConcurrentRequests
 	}
@@ -272,8 +272,9 @@ func applyDomainConfig(base config.Config, value settingsdomain.Config) config.C
 		MediaConcurrency: value.ProviderWeb.MediaConcurrency, AllowNSFW: value.ProviderWeb.AllowNSFW,
 		RecoveryBackoffBase: config.Duration(value.ProviderWeb.RecoveryBackoffBase), RecoveryBackoffMax: config.Duration(value.ProviderWeb.RecoveryBackoffMax),
 	}
-	// Legacy runtime_settings may omit ProviderConsole; empty BaseURL must not wipe defaults/yaml.
-	if strings.TrimSpace(value.ProviderConsole.BaseURL) != "" {
+	// Console 是后续版本新增的完整配置段；仅整段缺失时沿用代码默认值，
+	// 部分存在但不完整的配置仍交给 Validate 拒绝。
+	if value.ProviderConsole != (settingsdomain.ProviderConsoleConfig{}) {
 		base.Provider.Console = config.ConsoleProviderConfig{
 			BaseURL: value.ProviderConsole.BaseURL, UserAgent: value.ProviderConsole.UserAgent,
 			ChatTimeout: config.Duration(value.ProviderConsole.ChatTimeout),
