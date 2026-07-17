@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -600,9 +601,21 @@ attemptLoop:
 				continue
 			}
 		}
+		responseRetryable := isRetryableResponse(response)
+		if !responseRetryable && credential.Provider == accountdomain.ProviderBuild && response.StatusCode == http.StatusForbidden {
+			body, readErr := readRetryableBody(response.Body)
+			response.Body = io.NopCloser(bytes.NewReader(body))
+			if readErr == nil {
+				terminalFailure := newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)
+				if terminalFailure.ModelPermissionDenied {
+					s.selector.MarkModelPermissionDenied(ctx, credential, route.UpstreamModel)
+					s.selector.MarkQuotaStateChanged(credential.Provider)
+				}
+			}
+		}
 		egressForbidden := s.providers.RetryForbiddenAsEgress(credential.Provider) && response.StatusCode == http.StatusForbidden
 		finalEgressForbidden := egressForbidden && (attempt > 0 || attempt+1 >= attempts)
-		if isRetryableResponse(response) && !finalEgressForbidden {
+		if responseRetryable && !finalEgressForbidden {
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			body, _ := readRetryableBody(response.Body)
 			if egressForbidden {
