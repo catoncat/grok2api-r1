@@ -1,0 +1,30 @@
+backend/internal/infra/provider/console/normalize.go
+  s_5dd25c26ca862e::t_93895fb603e91c 101,110,112-114,116,134-144
+  s_5dd25c26ca862e::t_2548cec1489dac 145-146
+backend/internal/infra/provider/console/console_test.go
+  s_5dd25c26ca862e::t_93895fb603e91c 189-219
+backend/internal/application/gateway/service_test.go
+  s_5dd25c26ca862e::t_93895fb603e91c 749-805,1407-1410,1425
+backend/internal/application/gateway/service.go
+  s_5dd25c26ca862e::t_93895fb603e91c 664-668
+backend/internal/application/gateway/selector.go
+  s_5dd25c26ca862e::t_93895fb603e91c 29,438-448
+  s_5dd25c26ca862e::t_9de7036ff98250 449-451
+  s_5dd25c26ca862e::t_f334cf76fa8ae7 452
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "781bddb3cd527b4a2e48593ce9cf2dd92a6cbc81",
+  "prompts": {},
+  "sessions": {
+    "s_5dd25c26ca862e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6dc2-4030-7111-a54d-9db7d293f862",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
