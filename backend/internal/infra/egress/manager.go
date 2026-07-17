@@ -40,6 +40,7 @@ type Lease struct {
 	client    requestClient
 	browser   *browserClient
 	sticky    bool
+	nodeScope domain.Scope
 	release   func()
 }
 
@@ -211,7 +212,7 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 	m.mu.Unlock()
 	recordSelection(ctx, Selection{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, Proxied: proxyURL != ""})
 	var once sync.Once
-	return &Lease{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, ProxyURL: proxyURL, UserAgent: userAgent, CFCookies: cookies, client: client.client, browser: client.browser, sticky: sticky, release: func() {
+	return &Lease{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, ProxyURL: proxyURL, UserAgent: userAgent, CFCookies: cookies, client: client.client, browser: client.browser, sticky: sticky, nodeScope: selected.Scope, release: func() {
 		once.Do(func() {
 			m.mu.Lock()
 			m.inflight[selected.ID]--
@@ -412,6 +413,23 @@ func (m *Manager) clientFor(id uint64, scope domain.Scope, proxyURL, userAgent, 
 
 func (m *Manager) Feedback(ctx context.Context, nodeID uint64, status int, transportErr error) {
 	m.FeedbackForScope(ctx, domain.ScopeWeb, nodeID, status, transportErr)
+}
+
+func (m *Manager) FeedbackForLease(ctx context.Context, lease *Lease, status int, transportErr error) {
+	if lease == nil {
+		return
+	}
+	// A fallback lease owns its requested-scope client, but not the source node's
+	// shared health. Console failures must never cool the Web Resin fleet.
+	if lease.nodeScope != "" && lease.nodeScope != lease.Scope {
+		if transportErr != nil || status >= http.StatusInternalServerError || (lease.Scope != domain.ScopeBuild && status == http.StatusForbidden) {
+			m.mu.Lock()
+			m.invalidateClientForScopeLocked(lease.NodeID, lease.Scope)
+			m.mu.Unlock()
+		}
+		return
+	}
+	m.FeedbackForScope(ctx, lease.Scope, lease.NodeID, status, transportErr)
 }
 
 func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, nodeID uint64, status int, transportErr error) {

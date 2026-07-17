@@ -110,6 +110,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	}
 	cfg = loadedConfig
 	var mediaStore repository.MediaObjectStorage
+	mediaHealth := func(context.Context) error { return nil }
 	switch cfg.Media.Driver {
 	case "s3":
 		s3Store, s3Err := inframedia.NewS3Store(inframedia.S3Config{
@@ -126,6 +127,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 			return nil, s3Err
 		}
 		mediaStore = s3Store
+		mediaHealth = s3Store.Ping
 	default:
 		localStore, lErr := inframedia.NewLocalStore(cfg.Media.Local.Path)
 		if lErr != nil {
@@ -322,7 +324,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 
 	startup := newStartupState(len(windows))
 	readiness := func(readyCtx context.Context) httpserver.ReadinessSnapshot {
-		return readinessSnapshot(readyCtx, startup, runtimeHealth, modelRepo, accountRepo, providers)
+		return readinessSnapshot(readyCtx, startup, runtimeHealth, mediaHealth, modelRepo, accountRepo, providers)
 	}
 	router := httpserver.New(httpserver.Dependencies{Logger: logger, RequestTimeout: cfg.Server.RequestTimeout.Value(), MaxBodyBytes: cfg.Server.MaxBodyBytes, ConcurrencyGate: inferenceConcurrency, SecureCookies: cfg.Auth.SecureCookies, SwaggerEnabled: cfg.Server.SwaggerEnabled, PublicAPIBaseURL: cfg.Frontend.EffectivePublicAPIBaseURL(), FrontendStaticPath: cfg.Frontend.StaticPath, Readiness: readiness, TrafficReady: startup.acceptsTraffic, AdminAuth: adminService, Accounts: accountService, AccountSync: accountSyncService, Models: modelService, ClientKeys: clientKeyService, Audits: auditService, Dashboard: dashboardService, Gateway: gatewayService, Media: mediaService, Settings: settingsService, Egress: egressService, Updates: updateService})
 	server := &http.Server{Addr: cfg.Server.Listen, Handler: router, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: cfg.Server.ReadTimeout.Value(), IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}

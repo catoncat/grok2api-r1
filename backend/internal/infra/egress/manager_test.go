@@ -434,6 +434,52 @@ func TestConsoleFallsBackToWebAndSharesSSOResinIdentity(t *testing.T) {
 	}
 }
 
+func TestConsoleFallbackFeedbackDoesNotCoolWebResinNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyURL, err := cipher.Encrypt("socks5h://Default.{account}:token@resin:2260")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{
+		ID: 7, Name: "shared-web", Scope: domain.ScopeWeb, Enabled: true, Health: 1,
+		EncryptedProxyURL: proxyURL,
+	}}
+	manager := NewManager(repository, cipher)
+	web, err := manager.AcquireCredential(context.Background(), domain.ScopeWeb, accountdomain.Credential{ID: 11, Provider: accountdomain.ProviderWeb})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer web.Release()
+	console, err := manager.AcquireCredential(context.Background(), domain.ScopeConsole, accountdomain.Credential{ID: 22, Provider: accountdomain.ProviderConsole})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer console.Release()
+
+	manager.FeedbackForLease(context.Background(), console, http.StatusBadGateway, errors.New("console transport failed"))
+
+	if repository.updates != 0 || repository.node.Health != 1 || repository.node.CooldownUntil != nil {
+		t.Fatalf("Web Resin node was mutated by Console feedback: updates=%d node=%#v", repository.updates, repository.node)
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	webClientPresent := false
+	consoleClientPresent := false
+	for key := range manager.clients {
+		webClientPresent = webClientPresent || (key.nodeID == 7 && key.scope == domain.ScopeWeb)
+		consoleClientPresent = consoleClientPresent || (key.nodeID == 7 && key.scope == domain.ScopeConsole)
+	}
+	if !webClientPresent {
+		t.Fatal("Web Resin client was invalidated by Console feedback")
+	}
+	if consoleClientPresent {
+		t.Fatal("failed Console fallback client was not invalidated")
+	}
+}
+
 func TestConsoleDoesNotFallBackToStaticWebNode(t *testing.T) {
 	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	if err != nil {

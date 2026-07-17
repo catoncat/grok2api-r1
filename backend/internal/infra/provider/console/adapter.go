@@ -148,7 +148,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	}
 	response, err := lease.Do(upstream)
 	if err != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, 0, err)
+		a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, 0, err)
 		lease.Release()
 		cancel()
 		return nil, err
@@ -165,7 +165,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 	}
 	release := func() {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
+		a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, response.StatusCode, nil)
 		lease.Release()
 		cancel()
 	}
