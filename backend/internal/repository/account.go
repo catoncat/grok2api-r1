@@ -36,7 +36,7 @@ type AccountRepository interface {
 	ListMissingConsoleSyncAccounts(ctx context.Context, ids []uint64) ([]account.Credential, error)
 	// ListMissingConsoleSyncBatch 以 ID 游标取缺少 Console 账号的 Web 账号；total/skipped 仅在 afterID 为 0 时返回。
 	ListMissingConsoleSyncBatch(ctx context.Context, afterID uint64, limit int) ([]account.Credential, int64, int64, error)
-	HasActive(ctx context.Context, provider account.Provider) (bool, error)
+	HasActive(ctx context.Context, provider account.Provider, upstreamModel, quotaMode string) (bool, error)
 	ListRoutingCandidates(ctx context.Context, provider account.Provider, upstreamModel, quotaMode string) ([]account.RoutingCandidate, error)
 	Get(ctx context.Context, id uint64) (account.Credential, error)
 	LinkWebToBuild(ctx context.Context, webAccountID, buildAccountID uint64) error

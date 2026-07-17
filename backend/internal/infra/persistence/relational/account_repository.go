@@ -392,9 +392,110 @@ func (r *AccountRepository) ListMissingConsoleSyncBatch(ctx context.Context, aft
 	return values, total, skipped, nil
 }
 
-func (r *AccountRepository) HasActive(ctx context.Context, provider account.Provider) (bool, error) {
+func (r *AccountRepository) HasActive(ctx context.Context, provider account.Provider, upstreamModel, quotaMode string) (bool, error) {
 	var row struct{ ID uint64 }
-	err := r.db.db.WithContext(ctx).Model(&accountModel{}).Select("id").Where("provider = ? AND enabled = ? AND auth_status = ?", provider, true, account.AuthStatusActive).Take(&row).Error
+	now := time.Now().UTC()
+	query := r.db.db.WithContext(ctx).
+		Table("provider_accounts").
+		Select("provider_accounts.id").
+		Joins("JOIN account_credentials credential ON credential.account_id = provider_accounts.id").
+		Where("provider_accounts.provider = ? AND provider_accounts.enabled = ? AND provider_accounts.auth_status = ?", provider, true, account.AuthStatusActive).
+		Where("credential.encrypted_primary <> ''").
+		Where("provider_accounts.cooldown_until IS NULL OR provider_accounts.cooldown_until <= ?", now).
+		Where("provider_accounts.provider <> ? OR credential.expires_at IS NULL OR credential.expires_at > ?", account.ProviderBuild, now).
+		Where("NOT " + accountRecoveryPredicate).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM account_billing_snapshots billing
+			WHERE billing.account_id = provider_accounts.id
+				AND (
+					(billing.monthly_limit > 0 AND billing.monthly_limit - billing.used <= provider_accounts.minimum_remaining)
+					OR (billing.credit_usage_percent >= 100 AND (billing.on_demand_cap > 0 OR billing.usage_period_type <> ''))
+				)
+		)`)
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	quotaMode = strings.TrimSpace(quotaMode)
+	if upstreamModel != "" {
+		query = query.Where(`EXISTS (
+			SELECT 1 FROM model_routes route
+			WHERE route.provider = provider_accounts.provider
+				AND route.enabled = ?
+				AND route.upstream_model = ?
+				AND (
+					EXISTS (
+						SELECT 1 FROM model_route_accounts binding
+						WHERE binding.model_route_id = route.id AND binding.account_id = provider_accounts.id
+					)
+					OR (
+						NOT EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = route.id)
+						AND (
+							NOT EXISTS (
+								SELECT 1 FROM account_model_sync_states sync
+								WHERE sync.account_id = provider_accounts.id AND sync.last_success_at IS NOT NULL
+							)
+							OR EXISTS (
+								SELECT 1 FROM account_model_capabilities capability
+								WHERE capability.account_id = provider_accounts.id AND capability.upstream_model = route.upstream_model
+							)
+						)
+					)
+				)
+				AND NOT EXISTS (
+					SELECT 1 FROM account_model_quota_blocks block
+					WHERE block.account_id = provider_accounts.id
+						AND block.upstream_model = route.upstream_model
+						AND block.cooldown_until > ?
+				)
+		)`, true, upstreamModel, now)
+	}
+	if provider == account.ProviderWeb {
+		if quotaMode == "" || quotaMode == "weekly" {
+			query = query.Where(`
+				NOT EXISTS (
+					SELECT 1 FROM account_quota_windows quota
+					WHERE quota.account_id = provider_accounts.id AND quota.mode = 'weekly'
+				)
+				OR EXISTS (
+					SELECT 1 FROM account_quota_windows quota
+					WHERE quota.account_id = provider_accounts.id AND quota.mode = 'weekly' AND quota.remaining > 0
+				)
+			`)
+		} else {
+			query = query.Where(`
+				EXISTS (
+					SELECT 1 FROM account_quota_windows quota
+					WHERE quota.account_id = provider_accounts.id AND quota.mode = 'weekly' AND quota.remaining > 0
+				)
+				OR (
+					NOT EXISTS (
+						SELECT 1 FROM account_quota_windows quota
+						WHERE quota.account_id = provider_accounts.id AND quota.mode = 'weekly'
+					)
+					AND (
+						NOT EXISTS (
+							SELECT 1 FROM account_quota_windows quota
+							WHERE quota.account_id = provider_accounts.id AND quota.mode = ?
+						)
+						OR EXISTS (
+							SELECT 1 FROM account_quota_windows quota
+							WHERE quota.account_id = provider_accounts.id AND quota.mode = ? AND quota.remaining > 0
+						)
+					)
+				)
+			`, quotaMode, quotaMode)
+		}
+	} else if quotaMode != "" {
+		query = query.Where(`
+			NOT EXISTS (
+				SELECT 1 FROM account_quota_windows quota
+				WHERE quota.account_id = provider_accounts.id AND quota.mode = ?
+			)
+			OR EXISTS (
+				SELECT 1 FROM account_quota_windows quota
+				WHERE quota.account_id = provider_accounts.id AND quota.mode = ? AND quota.remaining > 0
+			)
+		`, quotaMode, quotaMode)
+	}
+	err := query.Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
 	}

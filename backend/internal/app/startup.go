@@ -165,23 +165,17 @@ func readinessSnapshot(
 	required := make(map[accountdomain.Provider]bool, 3)
 	usable := make(map[accountdomain.Provider]bool, 3)
 	providerErrors := make(map[accountdomain.Provider]bool, 3)
-	now := time.Now().UTC()
 	for _, route := range routes {
 		required[route.Provider] = true
-		if usable[route.Provider] || route.SupportedAccounts == 0 {
+		if route.SupportedAccounts == 0 || usable[route.Provider] || providerErrors[route.Provider] {
 			continue
 		}
-		candidates, listErr := accounts.ListRoutingCandidates(ctx, route.Provider, route.UpstreamModel, providers.QuotaMode(route.Provider, route.UpstreamModel))
-		if listErr != nil {
+		available, activeErr := accounts.HasActive(ctx, route.Provider, route.UpstreamModel, providers.QuotaMode(route.Provider, route.UpstreamModel))
+		if activeErr != nil {
 			providerErrors[route.Provider] = true
 			continue
 		}
-		for _, candidate := range candidates {
-			if startupCandidateUsable(candidate, now, providers) {
-				usable[route.Provider] = true
-				break
-			}
-		}
+		usable[route.Provider] = available
 	}
 
 	readyProviders := 0
@@ -249,36 +243,6 @@ func newReadinessStartupReport(report startupReport) *httpserver.ReadinessStartu
 		StaleModelCatalogsSynced: report.StaleModelCatalogsSynced,
 		ErrorCount:               report.ErrorCount,
 	}
-}
-
-func startupCandidateUsable(candidate accountdomain.RoutingCandidate, now time.Time, providers *provider.Registry) bool {
-	credential := candidate.Credential
-	if credential.EncryptedAccessToken == "" || credential.AuthStatus != accountdomain.AuthStatusActive {
-		return false
-	}
-	refreshable := credential.AuthType == accountdomain.AuthTypeOAuth
-	if providers != nil {
-		refreshable = providers.SupportsCredentialRefresh(credential.Provider)
-	}
-	if refreshable && !credential.ExpiresAt.IsZero() && !now.Before(credential.ExpiresAt) {
-		return false
-	}
-	if credential.CooldownUntil != nil && now.Before(*credential.CooldownUntil) {
-		return false
-	}
-	if candidate.ModelCapabilityKnown && !candidate.SupportsModel {
-		return false
-	}
-	if candidate.ModelQuotaBlock != nil && now.Before(candidate.ModelQuotaBlock.CooldownUntil) {
-		return false
-	}
-	if candidate.QuotaRecovery != nil && candidate.QuotaRecovery.Status != accountdomain.QuotaRecoveryStatusActive {
-		return false
-	}
-	if candidate.Billing != nil && candidate.Billing.IsExhausted(credential.MinimumRemaining) {
-		return false
-	}
-	return candidate.QuotaWindow == nil || candidate.QuotaWindow.Remaining > 0
 }
 
 func (a *Application) reconcileStartup(ctx context.Context) {
