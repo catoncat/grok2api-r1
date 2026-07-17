@@ -21,6 +21,7 @@ type UpstreamFailure struct {
 	AccountName            string
 	AccountScoped          bool
 	PermanentAccountDenial bool
+	ModelPermissionDenied  bool
 	QuotaExhausted         bool
 	FreeQuotaExhausted     bool
 	ModelQuotaExhausted    bool
@@ -85,6 +86,7 @@ func newHTTPUpstreamFailure(status int, body []byte, accountID uint64, accountNa
 		failure.Code = "upstream_forbidden"
 		failure.PublicMessage = "上游拒绝了该请求"
 		failure.PermanentAccountDenial = isPermanentAccountDenial(metadataText)
+		failure.ModelPermissionDenied = failure.PermanentAccountDenial && strings.EqualFold(upstreamCode, "permission_denied")
 		failure.ModelQuotaExhausted = isModelQuotaExhaustion(metadataText)
 		failure.FreeQuotaExhausted = failure.ModelQuotaExhausted || isFreeQuotaExhaustion(metadataText)
 		failure.QuotaExhausted = failure.FreeQuotaExhausted || isPaidQuotaExhaustion(metadataText)

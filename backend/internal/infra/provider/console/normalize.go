@@ -126,9 +126,23 @@ func mergeSearchTools(payload map[string]any) error {
 	if _, exists := payload["tool_choice"]; !exists {
 		payload["tool_choice"] = "auto"
 	} else {
-		payload["tool_choice"] = normalizeSearchToolAlias(payload["tool_choice"])
+		choice := normalizeSearchToolAlias(payload["tool_choice"])
+		identity := toolIdentity(choice)
+		if identity != "" && !containsToolIdentity(result, identity) {
+			return fmt.Errorf("Console tool_choice 指向未声明的上游工具 %q", identity)
+		}
+		payload["tool_choice"] = choice
 	}
 	return nil
+}
+
+func containsToolIdentity(tools []any, identity string) bool {
+	for _, tool := range tools {
+		if toolIdentity(tool) == identity {
+			return true
+		}
+	}
+	return false
 }
 
 func toolUpstreamName(value any) string {

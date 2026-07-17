@@ -768,14 +768,14 @@ func TestGatewayCoolsOnlyBuildModelWhenPermissionDenialSurvivesRefresh(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := modelRepo.UpsertDiscovered(ctx, account.ProviderBuild, []string{"grok-denied"}); err != nil {
+	if err := modelRepo.UpsertDiscovered(ctx, account.ProviderBuild, []string{"grok-denied", "grok-allowed"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"grok-denied"}, time.Now().UTC()); err != nil {
+	if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"grok-denied", "grok-allowed"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	clientKey := clientkey.Key{Name: "model-denied-key", Enabled: true, RPMLimit: 120, MaxConcurrent: 8}
-	adapter := &authRescueAdapter{permissionDeniedAll: true}
+	adapter := &authRescueAdapter{permissionDeniedModel: "grok-denied"}
 	registry := provider.NewRegistry(adapter)
 	sticky := memory.NewStickyStore()
 	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
@@ -800,6 +800,26 @@ func TestGatewayCoolsOnlyBuildModelWhenPermissionDenialSurvivesRefresh(t *testin
 	candidates, err := accountRepo.ListRoutingCandidates(ctx, account.ProviderBuild, "grok-denied", "")
 	if err != nil || len(candidates) != 1 || candidates[0].ModelQuotaBlock == nil || candidates[0].ModelQuotaBlock.Reason != "model_permission_denied" {
 		t.Fatalf("candidates = %#v, err = %v", candidates, err)
+	}
+	remaining := time.Until(candidates[0].ModelQuotaBlock.CooldownUntil)
+	if remaining < 23*time.Hour+59*time.Minute || remaining > 24*time.Hour+time.Minute {
+		t.Fatalf("model permission cooldown = %s", remaining)
+	}
+	result, err := service.CreateResponse(ctx, Input{
+		RequestID: "req-model-allowed", ClientKey: clientKey, PublicModel: "grok-allowed",
+		Body: []byte(`{"model":"grok-allowed","input":"hello"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Finalize(Usage{}, "", "")
+	_ = result.Body.Close()
+	if string(body) != "ok" {
+		t.Fatalf("allowed model body = %q", body)
 	}
 }
 
@@ -1404,10 +1424,10 @@ type systemicForbiddenAdapter struct {
 }
 
 type authRescueAdapter struct {
-	attempts            atomic.Int64
-	refreshes           atomic.Int64
-	rejectAll           atomic.Bool
-	permissionDeniedAll bool
+	attempts              atomic.Int64
+	refreshes             atomic.Int64
+	rejectAll             atomic.Bool
+	permissionDeniedModel string
 }
 
 func (a *authRescueAdapter) Provider() account.Provider { return account.ProviderBuild }
@@ -1422,7 +1442,7 @@ func (a *authRescueAdapter) ForwardResponse(_ context.Context, request provider.
 			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unauthorized","message":"access token rejected"}}`)),
 		}, nil
 	}
-	if a.permissionDeniedAll || request.Credential.EncryptedAccessToken == "access-old" {
+	if request.Model == a.permissionDeniedModel || request.Credential.EncryptedAccessToken == "access-old" {
 		return &provider.Response{
 			StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header),
 			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"permission_denied","message":"Access to the chat endpoint is denied"}}`)),

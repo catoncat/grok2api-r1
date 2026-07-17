@@ -661,7 +661,7 @@ attemptLoop:
 			} else if lastFailure.QuotaExhausted {
 				failureHandled = s.selector.MarkPaidQuotaExhausted(ctx, credential, lease.Billing)
 			}
-			if credential.Provider == accountdomain.ProviderBuild && lastFailure.PermanentAccountDenial {
+			if credential.Provider == accountdomain.ProviderBuild && lastFailure.ModelPermissionDenied {
 				s.selector.MarkModelPermissionDenied(ctx, credential, route.UpstreamModel)
 				s.selector.MarkQuotaStateChanged(credential.Provider)
 				failureHandled = true

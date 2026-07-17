@@ -217,6 +217,22 @@ func TestNormalizeRequestDoesNotInjectHostedSearchBesideSameNamedFunction(t *tes
 	}
 }
 
+func TestNormalizeRequestRejectsHostedChoiceReplacedBySameNamedFunction(t *testing.T) {
+	spec, ok := Resolve("grok-4.3")
+	if !ok {
+		t.Fatal("grok-4.3 missing")
+	}
+	_, err := normalizeRequest([]byte(`{
+		"model":"grok-4.3",
+		"input":"search",
+		"tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}],
+		"tool_choice":{"type":"web_search"}
+	}`), spec)
+	if err == nil || !strings.Contains(err.Error(), "tool_choice") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestConsoleImportAcceptsJSONPlainTextAndCookieFormat(t *testing.T) {
 	values, err := parseImportedCredentials([]byte("sso=token-one; sso-rw=token-one\ntoken-two\ntoken-two\n"))
 	if err != nil {
