@@ -1,0 +1,32 @@
+backend/internal/infra/persistence/relational/repository_test.go
+  s_54653f60ac62a9::t_011fec75196ac7 16,116-139
+  s_54653f60ac62a9::t_0ff842721236be 57-115,140-163
+backend/internal/app/startup_test.go
+  s_54653f60ac62a9::t_2fc3390775ada2 63,102,115
+backend/internal/infra/persistence/relational/account_repository.go
+  s_54653f60ac62a9::t_6d692a42244f15 395,398,415-449
+  s_54653f60ac62a9::t_2fc3390775ada2 397,399-414
+backend/internal/app/application.go
+  s_54653f60ac62a9::t_2fc3390775ada2 327
+backend/internal/app/startup.go
+  s_54653f60ac62a9::t_6d692a42244f15 164,170,173-174
+  s_54653f60ac62a9::t_2fc3390775ada2 169,172,175-176,179
+backend/internal/repository/account.go
+  s_54653f60ac62a9::t_6d692a42244f15 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "7a36844087bb833107b70d2afd9fe93e235e3be9",
+  "prompts": {},
+  "sessions": {
+    "s_54653f60ac62a9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a96-6b17-7360-ae10-e0d870c833f3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
