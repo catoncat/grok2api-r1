@@ -166,7 +166,7 @@ func isModelPermissionDenial(upstreamCode, text string) bool {
 	if !strings.Contains(text, "access to the chat endpoint is denied") {
 		return false
 	}
-	return upstreamCode == "" || strings.EqualFold(upstreamCode, "permission_denied")
+	return upstreamCode == "" || normalizeFailureCode(upstreamCode) == "permission_denied"
 }
 
 func isPaidQuotaExhaustion(text string) bool {

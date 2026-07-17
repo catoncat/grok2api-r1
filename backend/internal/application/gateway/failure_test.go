@@ -30,6 +30,10 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 			accountScoped: true, permanentAccountDenial: true, modelPermissionDenied: true, upstreamCode: "permission_denied",
 		},
 		{
+			name: "production top-level hyphenated model permission denial", body: `{"code":"permission-denied","error":"Access to the chat endpoint is denied. Please update the permissions."}`,
+			accountScoped: true, permanentAccountDenial: true, modelPermissionDenied: true, upstreamCode: "permission-denied",
+		},
+		{
 			name: "spending limit", body: `{"code":"personal-team-blocked:spending-limit","error":"quota exhausted"}`,
 			accountScoped: true, quotaExhausted: true, upstreamCode: "personal-team-blocked:spending-limit",
 		},
