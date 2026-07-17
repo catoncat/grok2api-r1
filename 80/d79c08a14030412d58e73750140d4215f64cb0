@@ -1,0 +1,25 @@
+backend/internal/infra/media/s3_store.go
+  s_54653f60ac62a9::t_1ae562a0b76f3b 11,21-28,33-35,37-38,74-76,157,159-165,169,171-173,175-185
+  s_54653f60ac62a9::t_9263832c5ae01d 92,168
+backend/internal/app/startup.go
+  s_54653f60ac62a9::t_1ae562a0b76f3b 142
+backend/internal/infra/media/s3_store_test.go
+  s_54653f60ac62a9::t_9263832c5ae01d 50,65-82
+  s_54653f60ac62a9::t_1ae562a0b76f3b 1-49,51-64,83-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "80d79c08a14030412d58e73750140d4215f64cb0",
+  "prompts": {},
+  "sessions": {
+    "s_54653f60ac62a9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a96-6b17-7360-ae10-e0d870c833f3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}
