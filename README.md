@@ -151,6 +151,29 @@ Grok Web 与 Grok Console 均支持账号列表 JSON，也支持每行一个 Tok
 
 Grok Console 固定使用 `store: false`，不支持 `previous_response_id`、Response 查询/删除或 `/responses/compact`。多轮调用应像 Codex 无状态链路一样回放完整输入、工具调用和工具结果；网关不会为 Console 响应登记虚假的持久化归属。
 
+### Console 文字与联网搜索
+
+管理员可在“上游账号”中选择已有 Web SSO，执行“同步到 Console”，策略选择 `missing`；该操作只创建或补齐关联的 Console 账号，不会修改 Web 账号的图片额度、出口或故障状态。同步完成后，在“模型管理”确认目标 Console 路由可用，再在“客户端密钥”中把该模型加入允许列表。
+
+调用方使用 `Console/` 前缀可强制走 Console，避免同名模型被自动选到 Web 或 Build。例如：
+
+```bash
+curl "$BASE_URL/v1/responses" \
+  -H "Authorization: Bearer $GROK2API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Console/grok-build-0.1",
+    "input": "搜索并返回 chenyme/grok2api 的官方 GitHub 仓库地址",
+    "tools": [{"type": "web_search"}],
+    "tool_choice": "required",
+    "store": false
+  }'
+```
+
+Console 同时接受 OpenAI 风格的 `web_search_preview` 工具类型别名，网关会把该类型名转换为上游支持的 `web_search`。免费 SSO 没有可承诺的 SLA，也不能自动续期：`401` 表示需要重新导入 SSO；`429` 应按 `Retry-After` 等待或切换模型；`422` 应检查是否使用了无状态输入以及受支持的工具参数。
+
+Console 的本地额度按“账号 + 真实上游模型”分别记录：6 个兼容调用名归并为 5 个真实模型窗口，其中 `grok-4.20-0309` 与官方指向的 `grok-4.20-0309-reasoning` 共用窗口。默认 `20 次/小时` 且 `source=default` 只是网关的保护性估算，不代表 xAI 官方免费额度；真实的上游 `429` 与 `Retry-After` 才是最终依据。普通额度 429 只暂停当前账号的当前模型；带 Team 和模型信息的频率限制只暂停同一 Team 的同一模型，不会连带阻断其他模型，也不会改变 Web 账号状态。已知 Team 会在 Web 转换或 JSON 导入时保留；纯 Token 导入无法预知 Team，网关会在上游首次返回 Team 级 429 后记住该身份，供后续请求和重启后使用。
+
 ## 模型
 
 对外模型名称不带 Provider 前缀，例如 `grok-4.5`。内部上游路由使用 `Build/`、`Web/`、`Console/` 前缀区分实际来源；Grok Build 模型根据账号能力动态同步，请以管理端模型页或 `GET /v1/models` 为准。
@@ -170,16 +193,18 @@ Grok Web 内置模型：
 | `grok-imagine-image-edit` | 图片编辑 | Super |
 | `grok-imagine-video` | 视频生成 | Super |
 
-Grok Console 内置模型：
+Grok Console 接受以下 6 个调用名。[xAI 官方模型文档](https://docs.x.ai/developers/models/grok-4.20-0309-reasoning)将 `grok-4.20-0309` 列为 reasoning 模型的别名，因此它不是第 6 个独立底层模型：
 
-| 模型 | 能力 |
-| :-- | :-- |
-| `grok-4.3` | Responses / Chat / Messages |
-| `grok-4.20-0309` | Responses / Chat / Messages |
-| `grok-4.20-0309-reasoning` | Responses / Chat / Messages |
-| `grok-4.20-0309-non-reasoning` | Responses / Chat / Messages |
-| `grok-4.20-multi-agent-0309` | Responses / Chat / Messages |
-| `grok-build-0.1` | Responses / Chat / Messages |
+| 对外模型 | Console 上游真实模型 | 能力 |
+| :-- | :-- | :-- |
+| `grok-4.3` | `grok-4.3` | Responses / Chat / Messages / Web 与 X 搜索 |
+| `grok-4.20-0309` | `grok-4.20-0309-reasoning`（官方别名） | Responses / Chat / Messages / Web 与 X 搜索 |
+| `grok-4.20-0309-reasoning` | `grok-4.20-0309-reasoning` | Responses / Chat / Messages / Web 与 X 搜索 |
+| `grok-4.20-0309-non-reasoning` | `grok-4.20-0309-non-reasoning` | Responses / Chat / Messages / Web 与 X 搜索 |
+| `grok-4.20-multi-agent-0309` | `grok-4.20-multi-agent-0309` | Responses / Chat / Messages / Web 与 X 搜索 |
+| `grok-build-0.1` | `grok-build-0.1` | Responses / Chat / Messages / Web 与 X 搜索 |
+
+这里的“真实模型”指 xAI 官方文档可区分的模型标识和限流桶，不声称能识别服务端内部权重或部署版本。[官方限流文档](https://docs.x.ai/developers/rate-limits)同时说明 API Team 按模型设置 RPS/TPM；它不能证明免费 SSO 拥有彼此独立的总调用额度。
 
 `grok-4.5` 不由 Grok Console Provider 注册；即使由 Web SSO 同步创建 Console 账号，该模型在 Console 中仍不可用。
 

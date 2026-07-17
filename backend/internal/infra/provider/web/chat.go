@@ -35,7 +35,10 @@ const maxDeferredSearchTextBytes = 8 << 20
 const maxTrackedServerTools = 1024
 
 var (
-	errWebAntiBot    = errors.New("Grok Web anti-bot rejection")
+	errWebAntiBot = errors.New("Grok Web anti-bot rejection")
+	// code 7 is an account/signature rejection, not evidence that the shared
+	// browser egress is unhealthy. Callers must never feed it back to egress.
+	errWebCode7      = errors.New("Grok Web account-side code 7 rejection")
 	errWebUsageLimit = errors.New("Grok Web usage limit reached")
 )
 
@@ -157,7 +160,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	var parsed parsedChat
 	var previous *inferencedomain.WebResponseState
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized)
+		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0)
 		if openErr != nil {
 			if errors.Is(openErr, errInvalidChatImage) {
 				return jsonProviderResponse(http.StatusBadRequest, map[string]any{"error": map[string]any{
@@ -168,15 +171,31 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 		previous = currentPrevious
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
+			body, responseErr := peekWebResponseError(upstream.Body, 1<<20)
+			upstream.Body = body
+			if errors.Is(responseErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
+					a.releaseStatsigRetry(upstream, lease)
+					continue
+				}
+				return &provider.Response{
+					StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header), UpstreamURL: statsigTarget,
+					Body: &releaseBody{ReadCloser: upstream.Body, release: lease.Release},
+				}, nil
+			}
 			if upstream.StatusCode == http.StatusForbidden {
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					a.releaseStatsigRetry(upstream, lease)
 					continue
 				}
 			}
+			upstreamURL := statsigTarget
+			if upstream.Request != nil && upstream.Request.URL != nil {
+				upstreamURL = upstream.Request.URL.String()
+			}
 			return &provider.Response{
 				StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header),
-				UpstreamURL: responseUpstreamURL(upstream),
+				UpstreamURL: upstreamURL,
 				Body: &releaseBody{ReadCloser: upstream.Body, release: func() {
 					a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
 					lease.Release()
@@ -187,17 +206,21 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		if streaming {
 			prepared, preflightErr := preflightUpstream(upstream.Body)
 			if preflightErr == nil {
-				body := a.streamOpenAIResponse(ctx, prepared, lease, request.Credential, responseID, input.Model, request.Operation, normalized.Prompt, previous, tools, parallelTools, conversationOptions)
+				body := a.streamOpenAIResponse(ctx, prepared, lease, request.Credential, responseID, input.Model, request.Operation, normalized.Prompt, previous, tools, parallelTools, conversationOptions, statsigTarget, statsigGenerationFromResponse(upstream))
 				return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: streamHeaders(), Body: body}, nil
 			}
-			if errors.Is(preflightErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+			if errors.Is(preflightErr, errWebCode7) && attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
+				a.releaseStatsigRetry(upstream, lease)
+				continue
+			}
+			if errors.Is(preflightErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 				a.releaseStatsigRetry(upstream, lease)
 				continue
 			}
 			_ = upstream.Body.Close()
 			lease.Release()
 			if errors.Is(preflightErr, errWebAntiBot) {
-				a.feedbackAntiBot(ctx, lease, statsigTarget)
+				a.feedbackAntiBot(ctx, lease, statsigTarget, statsigGenerationFromResponse(upstream))
 				return antiBotProviderResponse(), nil
 			}
 			return nil, preflightErr
@@ -205,15 +228,22 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 
 		currentParsed, consumeErr := consumeUpstream(upstream.Body, nil)
 		_ = upstream.Body.Close()
-		if errors.Is(consumeErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+		if errors.Is(consumeErr, errWebCode7) && attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
+			lease.Release()
+			continue
+		}
+		if errors.Is(consumeErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 			lease.Release()
 			continue
 		}
 		lease.Release()
 		if consumeErr != nil {
 			if errors.Is(consumeErr, errWebAntiBot) {
-				a.feedbackAntiBot(ctx, lease, statsigTarget)
+				a.feedbackAntiBot(ctx, lease, statsigTarget, statsigGenerationFromResponse(upstream))
 				return antiBotProviderResponse(), nil
+			}
+			if errors.Is(consumeErr, errWebCode7) {
+				return nil, consumeErr
 			}
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, consumeErr)
 			return nil, consumeErr
@@ -246,9 +276,14 @@ func (a *Adapter) releaseStatsigRetry(upstream *http.Response, lease *infraegres
 	lease.Release()
 }
 
-func (a *Adapter) feedbackAntiBot(ctx context.Context, lease *infraegress.Lease, statsigTarget string) {
-	a.invalidateSignedStatsig(http.MethodPost, statsigTarget)
+func (a *Adapter) feedbackAntiBot(ctx context.Context, lease *infraegress.Lease, statsigTarget string, generations ...uint64) {
+	a.invalidateSignedStatsig(http.MethodPost, statsigTarget, generations...)
 	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusForbidden, nil)
+}
+
+func (a *Adapter) retryAfterCode7(target string, generations ...uint64) bool {
+	a.invalidateSignedStatsig(http.MethodPost, target, generations...)
+	return true
 }
 
 func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
@@ -284,7 +319,7 @@ func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("Grok Web 首个流事件超过安全检查上限")
 }
 
-func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
+func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput, forceRemote bool) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
 	cfg := a.config()
 	token, err := a.cipher.Decrypt(credential.EncryptedAccessToken)
 	if err != nil {
@@ -330,9 +365,12 @@ func (a *Adapter) openChat(ctx context.Context, credential account.Credential, p
 		lease.Release()
 		return nil, nil, nil, "", err
 	}
-	request.Header = buildHeaders(token, lease, "application/json")
-	applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/")
-	a.applySignedStatsig(requestCtx, request, token, lease)
+	request.Header = buildSignedHeaders(token, lease, "application/json")
+	if err := a.applySignedStatsig(requestCtx, request, token, lease, forceRemote); err != nil {
+		cancel()
+		lease.Release()
+		return nil, nil, nil, "", err
+	}
 	response, err := lease.Do(request)
 	if err != nil {
 		cancel()
@@ -363,7 +401,7 @@ func (a *Adapter) handleResponseResource(ctx context.Context, request provider.R
 	return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: jsonHeaders(), Body: io.NopCloser(strings.NewReader(state.ResponseJSON))}, nil
 }
 
-func (a *Adapter) streamOpenAIResponse(ctx context.Context, source io.ReadCloser, lease *infraegress.Lease, credential account.Credential, responseID, model, operation, prompt string, previous *inferencedomain.WebResponseState, tools toolConfiguration, parallelTools bool, options conversation.ResponseOptions) io.ReadCloser {
+func (a *Adapter) streamOpenAIResponse(ctx context.Context, source io.ReadCloser, lease *infraegress.Lease, credential account.Credential, responseID, model, operation, prompt string, previous *inferencedomain.WebResponseState, tools toolConfiguration, parallelTools bool, options conversation.ResponseOptions, statsigTarget string, statsigGeneration uint64) io.ReadCloser {
 	reader, writer := io.Pipe()
 	go func() {
 		defer source.Close()
@@ -427,6 +465,11 @@ func (a *Adapter) streamOpenAIResponse(ctx context.Context, source io.ReadCloser
 			return writeWebStreamDelta(writer, messagesStream, operation, responseID, model, kind, delta)
 		})
 		if err != nil {
+			if errors.Is(err, errWebCode7) {
+				a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGeneration)
+				_ = writer.CloseWithError(err)
+				return
+			}
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
 			_ = writer.CloseWithError(err)
 			return
@@ -834,7 +877,10 @@ func webResponseError(value map[string]any) error {
 		message = "Grok Web stream error"
 	}
 	code, _ := numberAsInt(value["code"])
-	if code == 7 || strings.Contains(strings.ToLower(message), "anti-bot") {
+	if code == 7 {
+		return fmt.Errorf("%w: %s", errWebCode7, message)
+	}
+	if strings.Contains(strings.ToLower(message), "anti-bot") {
 		return fmt.Errorf("%w: %s", errWebAntiBot, message)
 	}
 	normalized := strings.ToLower(message)
@@ -842,6 +888,39 @@ func webResponseError(value map[string]any) error {
 		return fmt.Errorf("%w: %s", errWebUsageLimit, message)
 	}
 	return errors.New(message)
+}
+
+// peekWebResponseError reads only a bounded prefix, then reconstructs a reader
+// with that prefix followed by the untouched remainder so callers can preserve
+// upstream error bodies verbatim.
+func peekWebResponseError(source io.ReadCloser, limit int64) (io.ReadCloser, error) {
+	prefix, err := io.ReadAll(io.LimitReader(source, limit))
+	replayed := &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefix), source), closer: source}
+	if err != nil {
+		return replayed, err
+	}
+	return replayed, webResponseErrorFromBody(prefix)
+}
+
+func webResponseErrorFromBody(body []byte) error {
+	var root map[string]any
+	if json.Unmarshal(body, &root) != nil {
+		return nil
+	}
+	if value, ok := root["error"].(map[string]any); ok {
+		return webResponseError(value)
+	}
+	if _, hasCode := root["code"]; hasCode {
+		return webResponseError(root)
+	}
+	if result, ok := root["result"].(map[string]any); ok {
+		if response, ok := result["response"].(map[string]any); ok {
+			if value, ok := response["error"].(map[string]any); ok {
+				return webResponseError(value)
+			}
+		}
+	}
+	return nil
 }
 
 func antiBotProviderResponse() *provider.Response {

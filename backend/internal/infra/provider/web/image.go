@@ -25,12 +25,16 @@ import (
 )
 
 const (
-	maxGeneratedImages   = 10
-	mediaOutputAttempts  = 3
-	imageDownloadTimeout = 60 * time.Second
+	maxGeneratedImages     = 10
+	maxGeneratedImageBytes = 32 << 20
+	mediaOutputAttempts    = 3
+	imageDownloadTimeout   = 60 * time.Second
 )
 
-var errLiteImageReady = errors.New("Lite 图片已完成")
+var (
+	errLiteImageReady                = errors.New("Lite 图片已完成")
+	errInvalidGeneratedImageResponse = errors.New("上游图片响应无效")
+)
 
 type imagineModelConfig struct {
 	Pro             bool
@@ -299,15 +303,24 @@ func (e *liteUpstreamError) Response() *provider.Response {
 
 func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.Credential, spec ModelSpec, prompt string) (string, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt})
+		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt}, attempt > 0)
 		if err != nil {
 			return "", err
 		}
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(upstream.Body, 1<<20))
 			_ = upstream.Body.Close()
+			responseErr := webResponseErrorFromBody(body)
+			if errors.Is(responseErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
+					lease.Release()
+					continue
+				}
+				lease.Release()
+				return "", &liteUpstreamError{StatusCode: upstream.StatusCode, Status: upstream.Status, Body: body}
+			}
 			if upstream.StatusCode == http.StatusForbidden {
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
@@ -339,9 +352,17 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 				return "", &liteUpstreamError{StatusCode: http.StatusTooManyRequests, Status: "429 Too Many Requests", Body: body}
 			}
 			status := 0
+			if errors.Is(consumeErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
+					lease.Release()
+					continue
+				}
+				lease.Release()
+				return "", consumeErr
+			}
 			if errors.Is(consumeErr, errWebAntiBot) {
 				status = http.StatusForbidden
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
@@ -356,21 +377,21 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			}
 			return "", consumeErr
 		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
-		lease.Release()
-		if firstImage != "" {
-			return firstImage, nil
-		}
-		if len(parsed.Images) == 0 {
+		nodeID := lease.NodeID
+		if firstImage == "" && len(parsed.Images) == 0 {
 			parsed.Images = extractMarkdownImages(parsed.Text.String())
 		}
-		if len(parsed.Images) == 0 {
+		if firstImage == "" && len(parsed.Images) == 0 {
 			parsed.Images = extractCapturedImageURLs(capture.Bytes())
 		}
-		if len(parsed.Images) == 0 {
+		if firstImage == "" && len(parsed.Images) == 0 {
+			// IMPORTANT: do NOT Feedback(200) here. Empty stream / soft_stop is a failed
+			// generation; healing egress health on failure hides fleet wear until a later
+			// anti-bot wave crosses the health threshold in one poll.
 			diagnostics := inspectLiteCapture(capture.Bytes())
 			a.log().Warn("web_lite_image_not_found",
 				"account_id", credential.ID,
+				"egress_node_id", nodeID,
 				"captured_bytes", len(capture.Bytes()),
 				"frames", diagnostics.Frames,
 				"response_fields", diagnostics.ResponseFields,
@@ -383,7 +404,15 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 				"upstream_error_code", diagnostics.ErrorCode,
 				"upstream_error", diagnostics.ErrorMessage,
 			)
+			// Neutral for account-level soft_stop: no health heal, no anti-bot 403 mark.
+			// Transport-like soft signal would over-disable; leave health unchanged.
+			lease.Release()
 			return "", fmt.Errorf("Grok Web Lite 响应结束但未解析到最终图片")
+		}
+		a.egress.Feedback(context.WithoutCancel(ctx), nodeID, http.StatusOK, nil)
+		lease.Release()
+		if firstImage != "" {
+			return firstImage, nil
 		}
 		// Lite 上游固定生成两张，但每次查询只计一次 Fast 额度；按旧协议取首张并为 n 重复查询。
 		return parsed.Images[0], nil
@@ -568,7 +597,10 @@ func (a *Adapter) generateWSImage(ctx context.Context, request provider.ImageGen
 			continue
 		}
 		if message["type"] == "error" {
-			upstreamErr := fmt.Errorf("Imagine WebSocket 返回错误")
+			upstreamErr := imagineWebSocketError(message)
+			if errors.Is(upstreamErr, errWebCode7) {
+				return nil, upstreamErr
+			}
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, upstreamErr)
 			return nil, upstreamErr
 		}
@@ -634,7 +666,7 @@ func (a *Adapter) EditImage(ctx context.Context, request provider.ImageEditReque
 	refs := make([]string, 0, len(images))
 	parentID := ""
 	for _, image := range images {
-		uploaded, uploadErr := a.uploadImage(ctx, cfg, lease, token, image, cfg.BaseURL+"/imagine")
+		uploaded, uploadErr := a.uploadImage(ctx, cfg, lease, token, image)
 		if uploadErr != nil {
 			return nil, uploadErr
 		}
@@ -658,7 +690,7 @@ func (a *Adapter) EditImage(ctx context.Context, request provider.ImageEditReque
 		"disableTextFollowUps": true, "disableMemory": false, "forceSideBySide": false,
 		"responseMetadata": map[string]any{"modelConfigOverride": map[string]any{"modelMap": map[string]any{"imageEditModel": "imagine", "imageEditModelConfig": map[string]any{"imageReferences": refs, "parentPostId": parentID}}}},
 	}
-	response, err := a.postJSONWithReferer(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/conversations/new", payload, time.Duration(cfg.ImageTimeoutSeconds)*time.Second, cfg.BaseURL+"/imagine/post/"+parentID)
+	response, err := a.postSignedJSON(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/conversations/new", payload, time.Duration(cfg.ImageTimeoutSeconds)*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -856,9 +888,9 @@ func appendCapturedImageURL(results *[]string, value string) {
 	}
 }
 
-func (a *Adapter) uploadImage(ctx context.Context, cfg Config, lease *egress.Lease, token string, image provider.ImageInput, referer string) (uploadedFile, error) {
+func (a *Adapter) uploadImage(ctx context.Context, cfg Config, lease *egress.Lease, token string, image provider.ImageInput) (uploadedFile, error) {
 	payload := map[string]any{"fileName": image.Filename, "fileMimeType": image.MIMEType, "content": base64.StdEncoding.EncodeToString(image.Data)}
-	response, err := a.postJSONWithReferer(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/upload-file", payload, time.Minute, referer)
+	response, err := a.postSignedJSON(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/upload-file", payload, time.Minute)
 	if err != nil {
 		return uploadedFile{}, err
 	}
@@ -909,10 +941,10 @@ func (a *Adapter) createMediaPost(ctx context.Context, cfg Config, lease *egress
 }
 
 func (a *Adapter) postJSON(ctx context.Context, cfg Config, lease *egress.Lease, token, endpoint string, payload any, timeout time.Duration) (*http.Response, error) {
-	return a.postJSONWithReferer(ctx, cfg, lease, token, endpoint, payload, timeout, cfg.BaseURL+"/imagine")
+	return a.postSignedJSON(ctx, cfg, lease, token, endpoint, payload, timeout)
 }
 
-func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *egress.Lease, token, endpoint string, payload any, timeout time.Duration, referer string) (*http.Response, error) {
+func (a *Adapter) postSignedJSON(ctx context.Context, cfg Config, lease *egress.Lease, token, endpoint string, payload any, timeout time.Duration) (*http.Response, error) {
 	data, _ := json.Marshal(payload)
 	for attempt := 0; attempt < 2; attempt++ {
 		requestCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -921,16 +953,31 @@ func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *eg
 			cancel()
 			return nil, err
 		}
-		request.Header = buildHeaders(token, lease, "application/json")
-		applyAppHeaders(request.Header, cfg.BaseURL, referer)
-		a.applySignedStatsig(requestCtx, request, token, lease)
+		request.Header = buildSignedHeaders(token, lease, "application/json")
+		if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
+			cancel()
+			return nil, err
+		}
 		response, err := lease.Do(request)
 		if err != nil {
 			cancel()
 			return nil, err
 		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			body, responseErr := peekWebResponseError(response.Body, 1<<20)
+			response.Body = body
+			if errors.Is(responseErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(endpoint, statsigGenerationFromResponse(response)) {
+					_ = response.Body.Close()
+					cancel()
+					continue
+				}
+				response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
+				return response, nil
+			}
+		}
 		if response.StatusCode == http.StatusForbidden {
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
+			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint, statsigGenerationFromResponse(response)) {
 				_ = response.Body.Close()
 				cancel()
 				continue
@@ -960,21 +1007,25 @@ func (a *Adapter) imageResponse(ctx context.Context, credential account.Credenti
 }
 
 func (a *Adapter) imageDataItem(ctx context.Context, credential account.Credential, image imagineImageValue, format string) (map[string]any, error) {
-	if a.assets == nil {
-		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingStorage, fmt.Errorf("图片媒体存储未配置"))
-	}
 	raw, err := a.imageBytes(ctx, credential, image)
 	if err != nil {
 		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingDownload, err)
+	}
+	if format == "b64_json" {
+		mimeType, mimeErr := validatedImageMIME(raw, "")
+		if mimeErr != nil {
+			return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingDownload, mimeErr)
+		}
+		return map[string]any{"b64_json": base64.StdEncoding.EncodeToString(raw), "mime_type": mimeType, "revised_prompt": ""}, nil
+	}
+	if a.assets == nil {
+		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingStorage, fmt.Errorf("图片媒体存储未配置"))
 	}
 	asset, err := a.saveImageWithRetry(ctx, raw)
 	if err != nil {
 		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingStorage, err)
 	}
-	if format != "b64_json" {
-		return map[string]any{"url": a.assets.PublicImageURL(asset.ID), "mime_type": asset.MIMEType, "revised_prompt": ""}, nil
-	}
-	return map[string]any{"b64_json": base64.StdEncoding.EncodeToString(raw), "mime_type": asset.MIMEType, "revised_prompt": ""}, nil
+	return map[string]any{"url": a.assets.PublicImageURL(asset.ID), "mime_type": asset.MIMEType, "revised_prompt": ""}, nil
 }
 
 // saveImageWithRetry 只重试当前生成结果的本地持久化，不重新请求上游生成。
@@ -997,16 +1048,24 @@ func (a *Adapter) saveImageWithRetry(ctx context.Context, raw []byte) (mediadoma
 }
 
 func (a *Adapter) imageBytes(ctx context.Context, credential account.Credential, image imagineImageValue) ([]byte, error) {
+	// Imagine WebSocket delivers URL and blob in the same frame. Once the frame
+	// is readable, blob bytes have already crossed the egress, so downloading the
+	// URL would only duplicate traffic. Lite/app-chat paths are URL-only.
 	if strings.TrimSpace(image.Blob) != "" {
 		raw, err := decodeImageBlob(image.Blob)
 		if err == nil {
+			a.log().Info("image_asset_download", "path", "blob", "bytes", len(raw))
 			return raw, nil
 		}
 		if strings.TrimSpace(image.URL) == "" {
 			return nil, err
 		}
+		a.log().Warn("image_asset_blob_decode_fallback", "error", err)
 	}
-	return a.downloadImage(ctx, credential, image.URL)
+	if strings.TrimSpace(image.URL) != "" {
+		return a.downloadImage(ctx, credential, image.URL)
+	}
+	return nil, fmt.Errorf("图片结果没有 URL 或 blob")
 }
 
 func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter, connection *websocket.Conn, lease *egress.Lease, credential account.Credential, streamID string, count int, format, ratio, resolution string, modelConfig imagineModelConfig) {
@@ -1052,7 +1111,12 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 			continue
 		}
 		if message["type"] == "error" {
-			upstreamErr := fmt.Errorf("Imagine WebSocket 返回错误")
+			upstreamErr := imagineWebSocketError(message)
+			if errors.Is(upstreamErr, errWebCode7) {
+				writeImagineStreamFailure(writer, streamID, "upstream_error", "上游图片生成失败")
+				_ = writer.CloseWithError(upstreamErr)
+				return
+			}
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, upstreamErr)
 			writeImagineStreamFailure(writer, streamID, "upstream_error", "上游图片生成失败")
 			_ = writer.CloseWithError(upstreamErr)
@@ -1100,6 +1164,13 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 	_ = writer.Close()
 }
 
+func imagineWebSocketError(message map[string]any) error {
+	if value, ok := message["error"].(map[string]any); ok {
+		return webResponseError(value)
+	}
+	return webResponseError(message)
+}
+
 func writeImagineStreamFailure(writer io.Writer, streamID, code, message string) {
 	_ = writeSSE(writer, "image_generation.failed", map[string]any{
 		"type": "image_generation.failed", "id": streamID, "status": "failed",
@@ -1107,21 +1178,75 @@ func writeImagineStreamFailure(writer io.Writer, streamID, code, message string)
 	})
 }
 
+func newDirectImageClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Generated assets must not inherit HTTP_PROXY/HTTPS_PROXY from the host.
+	transport.Proxy = nil
+	return &http.Client{
+		Transport: transport,
+		Timeout:   90 * time.Second,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 5 || request.URL.Scheme != "https" || !trustedImageAssetHost(request.URL.Hostname()) {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+}
+
+func shouldFallbackDirectImage(status int, err error) bool {
+	return (err != nil && !errors.Is(err, errInvalidGeneratedImageResponse)) || status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+func readGeneratedImageResponse(response *http.Response) ([]byte, error) {
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("下载图片返回 %d", response.StatusCode)
+	}
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]))
+	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+		return nil, fmt.Errorf("%w: Content-Type %q", errInvalidGeneratedImageResponse, contentType)
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxGeneratedImageBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("图片下载失败: %w", err)
+	}
+	if len(raw) > maxGeneratedImageBytes {
+		return nil, fmt.Errorf("%w: 图片超过 32 MiB", errInvalidGeneratedImageResponse)
+	}
+	return raw, nil
+}
+
 func (a *Adapter) downloadImage(ctx context.Context, credential account.Credential, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme != "https" || !trustedImageAssetHost(parsed.Hostname()) || parsed.User != nil {
 		return nil, fmt.Errorf("图片内容 URL 不受信任")
 	}
+
 	token, err := a.cipher.Decrypt(credential.EncryptedAccessToken)
 	if err != nil {
 		return nil, err
 	}
+	raw, directStatus, directErr := a.downloadImageDirectAttempt(ctx, credential.ID, token, parsed.String())
+	if directErr == nil && directStatus >= 200 && directStatus < 300 {
+		a.log().Info("image_asset_download", "path", "direct_session", "host", parsed.Hostname(), "bytes", len(raw))
+		return raw, nil
+	}
+	if !shouldFallbackDirectImage(directStatus, directErr) {
+		if directErr != nil {
+			return nil, directErr
+		}
+		return nil, fmt.Errorf("直连下载图片返回 %d", directStatus)
+	}
+	a.log().Warn("image_asset_direct_fallback", "host", parsed.Hostname(), "status", directStatus, "error", directErr)
+
 	downloadCtx, cancel := context.WithTimeout(ctx, imageDownloadTimeout)
 	defer cancel()
 	var lastErr error
 	for attempt := 0; attempt < mediaOutputAttempts; attempt++ {
 		raw, retryable, attemptErr := a.downloadImageAttempt(downloadCtx, credential.ID, token, parsed.String())
 		if attemptErr == nil {
+			a.log().Info("image_asset_download", "path", "egress_fallback", "host", parsed.Hostname(), "bytes", len(raw))
 			return raw, nil
 		}
 		lastErr = attemptErr
@@ -1135,6 +1260,45 @@ func (a *Adapter) downloadImage(ctx context.Context, credential account.Credenti
 	return nil, lastErr
 }
 
+func imageAssetHeaders(token string, lease *egress.Lease) http.Header {
+	headers := buildHeaders(token, lease, "")
+	headers.Del("Content-Type")
+	headers.Set("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
+	return headers
+}
+
+// downloadImageDirectAttempt borrows only the selected session identity; image bytes use tc-sv direct transport.
+func (a *Adapter) downloadImageDirectAttempt(ctx context.Context, accountID uint64, token, rawURL string) ([]byte, int, error) {
+	lease, err := a.egress.Acquire(ctx, domainegress.ScopeWebAsset, fmt.Sprintf("%d", accountID))
+	if err != nil {
+		return nil, 0, err
+	}
+	defer lease.Release()
+	client := a.assetClient
+	if client == nil {
+		client = newDirectImageClient()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	request.Header = imageAssetHeaders(token, lease)
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, 0, err
+	}
+	status := response.StatusCode
+	if status < 200 || status >= 300 {
+		_ = response.Body.Close()
+		return nil, status, nil
+	}
+	raw, err := readGeneratedImageResponse(response)
+	if err != nil {
+		return nil, status, err
+	}
+	return raw, status, nil
+}
+
 // downloadImageAttempt 每次沿用同一账号，只允许出口管理器重新选择资源节点。
 func (a *Adapter) downloadImageAttempt(ctx context.Context, accountID uint64, token, rawURL string) ([]byte, bool, error) {
 	lease, err := a.egress.Acquire(ctx, domainegress.ScopeWebAsset, fmt.Sprintf("%d", accountID))
@@ -1146,8 +1310,7 @@ func (a *Adapter) downloadImageAttempt(ctx context.Context, accountID uint64, to
 	if err != nil {
 		return nil, false, err
 	}
-	request.Header = buildHeaders(token, lease, "")
-	request.Header.Del("Content-Type")
+	request.Header = imageAssetHeaders(token, lease)
 	response, err := lease.Do(request)
 	if err != nil {
 		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)

@@ -923,8 +923,15 @@ function AccountStatus({ account }: { account: AccountDTO }) {
   if (account.authStatus === "reauthRequired") {
     return <Badge variant="destructive">{t("accounts.statusReauthRequired")}</Badge>;
   }
-  if (account.provider === "grok_console" && account.quotaWindows?.some((window) => window.mode === "console" && window.remaining <= 0)) {
-    return <Badge variant="secondary" className="bg-amber-500/10 text-amber-700 dark:text-amber-300">{t("accounts.waitingReset")}</Badge>;
+  if (account.provider === "grok_console") {
+    const currentWindows = account.quotaWindows?.filter((window) => window.mode === "console" || window.mode.startsWith("console:")) ?? [];
+    const exhausted = currentWindows.filter((window) => window.remaining <= 0).length;
+    if (currentWindows.length > 0 && exhausted === currentWindows.length) {
+      return <Badge variant="secondary" className="bg-amber-500/10 text-amber-700 dark:text-amber-300">{t("accounts.waitingReset")}</Badge>;
+    }
+    if (exhausted > 0) {
+      return <Badge variant="secondary" className="bg-amber-500/10 text-amber-700 dark:text-amber-300">{t("accounts.partialQuota")}</Badge>;
+    }
   }
   if (account.quota.status === "waitingReset") {
     return <Badge variant="secondary" className="bg-amber-500/10 text-amber-700 dark:text-amber-300">{t("accounts.waitingReset")}</Badge>;

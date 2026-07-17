@@ -106,11 +106,43 @@ function BuildQuota({ quota, billing, locale }: { quota: QuotaDTO; billing?: Bil
 
 const visibleWebQuotaModes = ["auto", "fast", "expert", "heavy"] as const;
 
+const consoleQuotaModes = [
+  { mode: "console:grok-4.3", label: "Grok 4.3" },
+  { mode: "console:grok-4.20-0309-reasoning", label: "4.20 R" },
+  { mode: "console:grok-4.20-0309-non-reasoning", label: "4.20 NR" },
+  { mode: "console:grok-4.20-multi-agent-0309", label: "4.20 MA" },
+  { mode: "console:grok-build-0.1", label: "Build 0.1" },
+] as const;
+
 export function ConsoleQuota({ windows, locale }: { windows: NonNullable<AccountDTO["quotaWindows"]>; locale: string }) {
   const { t } = useTranslation();
-  const window = windows.find((value) => value.mode === "console") ?? windows[0];
-  if (!window) return <span className="text-xs text-muted-foreground">{t("accounts.quotaNotSynced")}</span>;
-  return <WebQuotaMode mode="Console" window={window} locale={locale} />;
+  const modelWindows = new Map<string, WebQuotaWindow>();
+  for (const window of windows) {
+    if (!window.mode.startsWith("console:")) continue;
+    const mode = window.mode === "console:grok-4.20-0309" ? "console:grok-4.20-0309-reasoning" : window.mode;
+    if (!modelWindows.has(mode) || window.mode === mode) modelWindows.set(mode, window);
+  }
+  if (modelWindows.size === 0) {
+    const legacy = windows.find((window) => window.mode === "console");
+    if (!legacy) return <span className="text-xs text-muted-foreground">{t("accounts.quotaNotSynced")}</span>;
+    return <WebQuotaMode mode="Console" window={legacy} locale={locale} />;
+  }
+  const knownModes = new Set<string>(consoleQuotaModes.map(({ mode }) => mode));
+  const visible = [
+    ...consoleQuotaModes.flatMap(({ mode, label }) => {
+      const window = modelWindows.get(mode);
+      return window ? [{ mode, label, window }] : [];
+    }),
+    ...[...modelWindows.entries()]
+      .filter(([mode]) => !knownModes.has(mode))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([mode, window]) => ({ mode, label: mode.slice("console:".length), window })),
+  ];
+  return (
+    <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-1.5 2xl:grid-cols-3">
+      {visible.map(({ mode, label, window }) => <WebQuotaMode key={mode} mode={mode.slice("console:".length)} label={label} window={window} locale={locale} />)}
+    </div>
+  );
 }
 
 export function WebQuota({ windows, locale, tier }: { windows: NonNullable<AccountDTO["quotaWindows"]>; locale: string; tier?: AccountDTO["webTier"] }) {
@@ -160,7 +192,7 @@ function WeeklyWebQuota({ window, locale, t }: { window: WebQuotaWindow; locale:
   );
 }
 
-function WebQuotaMode({ mode, window, locale, compact = false }: { mode: string; window: WebQuotaWindow; locale: string; compact?: boolean }) {
+function WebQuotaMode({ mode, label = mode, window, locale, compact = false }: { mode: string; label?: string; window: WebQuotaWindow; locale: string; compact?: boolean }) {
   const { t } = useTranslation();
   const used = Math.max(0, window.total - window.remaining);
   const percent = window.total > 0 ? Math.max(0, Math.min(100, used / window.total * 100)) : 0;
@@ -168,7 +200,7 @@ function WebQuotaMode({ mode, window, locale, compact = false }: { mode: string;
     <Tooltip>
       <TooltipTrigger asChild>
         <button type="button" className={cn("block w-full min-w-0 text-left", compact && "px-2 first:pl-0 last:pr-0")}>
-          <div className="flex items-center justify-between gap-1 text-[11px]"><span className="truncate text-muted-foreground">{mode}</span><span className="shrink-0 tabular-nums">{formatNumber(used, locale, 0)}/{formatNumber(window.total, locale, 0)}</span></div>
+          <div className="flex items-center justify-between gap-1 text-[11px]"><span className="truncate text-muted-foreground" title={mode}>{label}</span><span className="shrink-0 tabular-nums">{formatNumber(used, locale, 0)}/{formatNumber(window.total, locale, 0)}</span></div>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${percent}%` }} /></div>
         </button>
       </TooltipTrigger>

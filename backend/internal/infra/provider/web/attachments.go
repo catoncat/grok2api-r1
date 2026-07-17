@@ -74,7 +74,7 @@ func (a *Adapter) prepareChatAttachments(ctx context.Context, cfg Config, lease 
 		if total > maxChatImageTotalBytes {
 			return nil, fmt.Errorf("%w: 对话图片总大小不能超过 64 MiB", errInvalidChatImage)
 		}
-		uploaded, err := a.uploadImage(ctx, cfg, lease, token, image, cfg.BaseURL+"/")
+		uploaded, err := a.uploadImage(ctx, cfg, lease, token, image)
 		if err != nil {
 			return nil, err
 		}

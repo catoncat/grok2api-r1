@@ -68,6 +68,54 @@ func TestCatalogContainsAllConsoleModelsAndAliases(t *testing.T) {
 	}
 }
 
+func TestConsoleQuotaWindowsAreIsolatedByUpstreamModel(t *testing.T) {
+	adapter := NewAdapter(Config{}, nil, nil)
+	credential := account.Credential{ID: 42, Provider: account.ProviderConsole}
+	snapshot, err := adapter.SyncQuota(context.Background(), credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := Catalog()
+	quotaModes := QuotaModes()
+	if len(quotaModes) != 5 || len(snapshot.Windows) != len(quotaModes) {
+		t.Fatalf("quota windows/modes = %d/%d, want five real model buckets", len(snapshot.Windows), len(quotaModes))
+	}
+	windows := make(map[string]account.QuotaWindow, len(snapshot.Windows))
+	for _, window := range snapshot.Windows {
+		if _, exists := windows[window.Mode]; exists {
+			t.Fatalf("duplicate quota mode %q", window.Mode)
+		}
+		windows[window.Mode] = window
+	}
+	for _, spec := range models {
+		mode := adapter.QuotaMode(spec.UpstreamModel)
+		expectedModel := spec.UpstreamModel
+		if spec.QuotaModel != "" {
+			expectedModel = spec.QuotaModel
+		}
+		if mode != "console:"+expectedModel {
+			t.Fatalf("quota mode for %q = %q", spec.UpstreamModel, mode)
+		}
+		window, ok := windows[mode]
+		if !ok || window.AccountID != credential.ID || window.Remaining != DefaultQuotaLimit || window.Total != DefaultQuotaLimit || window.ResetAt == nil {
+			t.Fatalf("quota window for %q = %#v", spec.UpstreamModel, window)
+		}
+		refreshed, err := adapter.SyncQuotaMode(context.Background(), credential, mode)
+		if err != nil || refreshed.Mode != mode {
+			t.Fatalf("refresh quota mode %q = %#v, %v", mode, refreshed, err)
+		}
+	}
+	if alias, reasoning := adapter.QuotaMode("grok-4.20-0309"), adapter.QuotaMode("grok-4.20-0309-reasoning"); alias != reasoning {
+		t.Fatalf("official alias quota mode = %q, reasoning mode = %q", alias, reasoning)
+	}
+	if mode := adapter.QuotaMode("unknown-model"); mode != "" {
+		t.Fatalf("unknown model quota mode = %q", mode)
+	}
+	if _, err := adapter.SyncQuotaMode(context.Background(), credential, "console"); err == nil {
+		t.Fatal("legacy shared Console quota mode was accepted")
+	}
+}
+
 func TestNormalizeRequestAppliesConsoleContract(t *testing.T) {
 	spec, ok := Resolve("grok-4.3")
 	if !ok {
@@ -110,6 +158,34 @@ func TestNormalizeRequestAppliesConsoleContract(t *testing.T) {
 	}
 }
 
+func TestNormalizeRequestMapsOpenAISearchPreviewToConsoleWebSearch(t *testing.T) {
+	spec, ok := Resolve("grok-build-0.1")
+	if !ok {
+		t.Fatal("grok-build-0.1 missing")
+	}
+	body, err := normalizeRequest([]byte(`{
+		"model":"grok-build-0.1",
+		"input":"search",
+		"tools":[{"type":"web_search_preview"}],
+		"tool_choice":{"type":"web_search_preview"}
+	}`), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 || toolIdentity(tools[0]) != "web_search" || toolIdentity(tools[1]) != "x_search" {
+		t.Fatalf("tools = %#v", tools)
+	}
+	choice, _ := payload["tool_choice"].(map[string]any)
+	if choice["type"] != "web_search" {
+		t.Fatalf("tool_choice = %#v", payload["tool_choice"])
+	}
+}
+
 func TestConsoleImportAcceptsJSONPlainTextAndCookieFormat(t *testing.T) {
 	values, err := parseImportedCredentials([]byte("sso=token-one; sso-rw=token-one\ntoken-two\ntoken-two\n"))
 	if err != nil {
@@ -118,11 +194,11 @@ func TestConsoleImportAcceptsJSONPlainTextAndCookieFormat(t *testing.T) {
 	if len(values) != 2 || values[0].AccessToken != "token-one" || values[1].AccessToken != "token-two" {
 		t.Fatalf("plain values = %#v", values)
 	}
-	values, err = parseImportedCredentials([]byte(`{"provider":"grok_console","accounts":[{"name":"console-a","sso_token":"token-a"}]}`))
+	values, err = parseImportedCredentials([]byte(`{"provider":"grok_console","accounts":[{"name":"console-a","team_id":"team-a","sso_token":"token-a"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(values) != 1 || values[0].Provider != account.ProviderConsole || values[0].AuthType != account.AuthTypeSSO || values[0].Name != "console-a" || values[0].AccessToken != "token-a" {
+	if len(values) != 1 || values[0].Provider != account.ProviderConsole || values[0].AuthType != account.AuthTypeSSO || values[0].Name != "console-a" || values[0].TeamID != "team-a" || values[0].AccessToken != "token-a" {
 		t.Fatalf("json values = %#v", values)
 	}
 }

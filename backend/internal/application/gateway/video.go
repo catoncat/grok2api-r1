@@ -284,7 +284,9 @@ func (s *Service) runVideoJob(parent context.Context, job media.Job, route model
 		}
 		failureCtx, failureCancel := context.WithTimeout(context.Background(), finalizationTimeout)
 		failureHandled := false
-		if errors.Is(err, provider.ErrUnauthorized) {
+		if errors.Is(err, provider.ErrRequestSigning) {
+			failureHandled = true
+		} else if errors.Is(err, provider.ErrUnauthorized) {
 			if lease.Credential.AuthType == account.AuthTypeSSO {
 				_ = s.accounts.MarkReauthRequired(failureCtx, lease.Credential.ID, fmt.Sprintf("%s SSO credential rejected", lease.Credential.Provider))
 			}

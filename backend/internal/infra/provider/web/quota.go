@@ -148,9 +148,10 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 		if requestErr != nil {
 			return account.QuotaWindow{}, requestErr
 		}
-		request.Header = buildHeaders(token, lease, "application/json")
-		applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/")
-		a.applySignedStatsig(requestCtx, request, token, lease)
+		request.Header = buildSignedHeaders(token, lease, "application/json")
+		if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
+			return account.QuotaWindow{}, err
+		}
 		response, err = lease.Do(request)
 		if err != nil {
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
@@ -161,8 +162,14 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 		if err != nil {
 			return account.QuotaWindow{}, err
 		}
+		if errors.Is(webResponseErrorFromBody(body), errWebCode7) {
+			if attempt == 0 && a.retryAfterCode7(endpoint, statsigGenerationFromResponse(response)) {
+				continue
+			}
+			return account.QuotaWindow{}, fmt.Errorf("Grok Web 额度接口返回 code 7")
+		}
 		if response.StatusCode == http.StatusForbidden {
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
+			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint, statsigGenerationFromResponse(response)) {
 				continue
 			}
 		}
@@ -232,6 +239,9 @@ func (a *Adapter) syncWeeklyCredits(ctx context.Context, credential account.Cred
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
 		return account.QuotaWindow{}, err
+	}
+	if errors.Is(webResponseErrorFromBody(body), errWebCode7) {
+		return account.QuotaWindow{}, fmt.Errorf("Grok Web 周额度接口返回 code 7")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)

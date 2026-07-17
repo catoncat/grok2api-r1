@@ -1,11 +1,13 @@
 package egress
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -20,7 +22,10 @@ import (
 )
 
 const DefaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-const nodeSnapshotTTL = time.Second
+const (
+	nodeSnapshotTTL     = time.Second
+	affinityHealthFloor = 0.5
+)
 
 type Lease struct {
 	NodeID    uint64
@@ -55,6 +60,7 @@ func (l *Lease) Release() {
 type Manager struct {
 	repository repository.EgressRepository
 	cipher     *security.Cipher
+	feedbackMu sync.Mutex
 	mu         sync.Mutex
 	clients    map[clientCacheKey]cachedClient
 	inflight   map[uint64]int
@@ -94,7 +100,8 @@ func (m *Manager) AcquireIfConfigured(ctx context.Context, scope domain.Scope, a
 func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity string, allowDirect bool) (*Lease, bool, error) {
 	now := time.Now().UTC()
 	configured := false
-	var available []domain.Node
+	var selected domain.Node
+	selectedOK := false
 	for _, candidateScope := range fallbackScopes(scope) {
 		nodes, err := m.listNodes(ctx, candidateScope, now)
 		if err != nil {
@@ -107,12 +114,12 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 				candidateAvailable = append(candidateAvailable, node)
 			}
 		}
-		if len(candidateAvailable) > 0 {
-			available = candidateAvailable
+		sort.SliceStable(candidateAvailable, func(i, j int) bool { return candidateAvailable[i].ID < candidateAvailable[j].ID })
+		if selected, selectedOK = m.selectNode(candidateAvailable, affinity); selectedOK {
 			break
 		}
 	}
-	if len(available) == 0 {
+	if !selectedOK {
 		if configured {
 			return nil, false, fmt.Errorf("当前没有可用的 %s 出口节点", scope)
 		}
@@ -120,10 +127,8 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 			recordSelection(ctx, Selection{NodeName: "direct", Scope: scope})
 			return nil, false, nil
 		}
-		available = []domain.Node{{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}}
+		selected = domain.Node{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}
 	}
-	sort.SliceStable(available, func(i, j int) bool { return available[i].ID < available[j].ID })
-	selected := m.selectNode(available, affinity)
 	proxyURL, err := m.cipher.Decrypt(selected.EncryptedProxyURL)
 	if err != nil {
 		return nil, false, err
@@ -213,29 +218,62 @@ func fallbackScopes(scope domain.Scope) []domain.Scope {
 	return []domain.Scope{scope}
 }
 
-func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
-	if affinity != "" {
-		digest := sha256.Sum256([]byte(affinity))
-		selected := nodes[int(binary.BigEndian.Uint64(digest[:8])%uint64(len(nodes)))]
-		if selected.Health >= 0.8 || len(nodes) == 1 {
-			return selected
+func (m *Manager) selectNode(nodes []domain.Node, affinity string) (domain.Node, bool) {
+	safe := make([]domain.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if !strings.Contains(strings.ToLower(node.LastError), "anti-bot") {
+			safe = append(safe, node)
 		}
-		for _, node := range nodes {
-			if node.Health > selected.Health {
-				selected = node
+	}
+	if len(safe) == 0 {
+		return domain.Node{}, false
+	}
+	if affinity != "" {
+		candidates := make([]domain.Node, 0, len(safe))
+		for _, node := range safe {
+			if node.Health >= affinityHealthFloor {
+				candidates = append(candidates, node)
 			}
 		}
-		return selected
+		if len(candidates) == 0 {
+			candidates = safe
+		}
+		return rendezvousNode(candidates, affinity), true
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	best := nodes[0]
-	for _, node := range nodes[1:] {
+	best := safe[0]
+	for _, node := range safe[1:] {
 		if m.inflight[node.ID] < m.inflight[best.ID] || (m.inflight[node.ID] == m.inflight[best.ID] && node.Health > best.Health) {
 			best = node
 		}
 	}
-	return best
+	return best, true
+}
+
+func rendezvousNode(nodes []domain.Node, affinity string) domain.Node {
+	selected := nodes[0]
+	best := rendezvousScore(affinity, selected.ID)
+	for _, node := range nodes[1:] {
+		score := rendezvousScore(affinity, node.ID)
+		if bytes.Compare(score[:], best[:]) > 0 {
+			selected = node
+			best = score
+		}
+	}
+	return selected
+}
+
+func rendezvousScore(affinity string, nodeID uint64) [sha256.Size]byte {
+	var encodedNodeID [8]byte
+	binary.BigEndian.PutUint64(encodedNodeID[:], nodeID)
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(affinity))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(encodedNodeID[:])
+	var score [sha256.Size]byte
+	copy(score[:], hash.Sum(nil))
+	return score
 }
 
 func (m *Manager) clientFor(id uint64, scope domain.Scope, proxyURL, userAgent, cookies string) (cachedClient, error) {
@@ -299,17 +337,22 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		}
 		return
 	}
+	m.feedbackMu.Lock()
+	defer m.feedbackMu.Unlock()
 	value, err := m.repository.GetEgressNode(ctx, nodeID)
 	if err != nil {
 		return
 	}
 	now := time.Now().UTC()
+	before := value.Health
+	kind := "noop"
 	switch {
 	case transportErr == nil && status >= 200 && status < 400:
 		value.Health = min(1, value.Health+0.1)
 		value.FailureCount = 0
 		value.CooldownUntil = nil
 		value.LastError = ""
+		kind = "success"
 	case status == http.StatusUnauthorized || status == http.StatusTooManyRequests:
 		return
 	case scope == domain.ScopeBuild && status == http.StatusForbidden:
@@ -317,10 +360,18 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		// 分类；仅凭状态码不能把标准 CLI 出口误判为 Web anti-bot。
 		return
 	case status == http.StatusForbidden:
-		value.FailureCount++
-		value.Health = max(0.05, value.Health*0.7)
+		confirmed := value.FailureCount > 0 && value.LastError == "web rejection unconfirmed"
+		if confirmed {
+			value.FailureCount++
+			value.Health = max(0.05, value.Health*0.7)
+			value.LastError = "anti-bot rejection"
+			kind = "anti_bot"
+		} else {
+			value.FailureCount = 1
+			value.LastError = "web rejection unconfirmed"
+			kind = "anti_bot_suspect"
+		}
 		value.CooldownUntil = nil
-		value.LastError = "anti-bot rejection"
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)
 		m.mu.Unlock()
@@ -332,12 +383,29 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		value.CooldownUntil = &until
 		if transportErr != nil {
 			value.LastError = "transport error"
+			kind = "transport"
 		} else {
 			value.LastError = fmt.Sprintf("upstream status %d", status)
+			kind = "status"
 		}
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)
 		m.mu.Unlock()
+	}
+	crossed := before >= 0.5 && value.Health < 0.5
+	// Log failures and threshold crossings; skip routine success heals to keep volume low.
+	if kind != "success" || crossed {
+		slog.Default().Info("egress_feedback",
+			"node_id", nodeID,
+			"scope", string(scope),
+			"kind", kind,
+			"status", status,
+			"health_before", before,
+			"health_after", value.Health,
+			"failure_count", value.FailureCount,
+			"crossed_threshold", crossed,
+			"last_error", value.LastError,
+		)
 	}
 	if _, err := m.repository.UpdateEgressNode(ctx, value); err == nil {
 		m.invalidateNodes(value.Scope)

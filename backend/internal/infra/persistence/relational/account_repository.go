@@ -778,6 +778,23 @@ func (r *AccountRepository) UpdateCredentialRefreshFailure(ctx context.Context, 
 	}).Error
 }
 
+// UpdateTeamID persists upstream-observed routing metadata without changing the
+// account's stable import identity key.
+func (r *AccountRepository) UpdateTeamID(ctx context.Context, id uint64, teamID string) error {
+	teamID = strings.TrimSpace(teamID)
+	if id == 0 || teamID == "" || len(teamID) > 255 {
+		return repository.ErrConflict
+	}
+	result := r.db.db.WithContext(ctx).Model(&accountModel{}).Where("id = ?", id).Update("team_id", teamID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
 func (r *AccountRepository) UpdateObservedModel(ctx context.Context, id uint64, model string, observedAt time.Time) error {
 	return r.db.db.WithContext(ctx).Model(&accountModel{}).Where("id = ?", id).Updates(map[string]any{"observed_model": truncate(model, 255), "observed_model_at": observedAt}).Error
 }
@@ -920,6 +937,74 @@ func (r *AccountRepository) HasQuotaWindows(ctx context.Context, accountID uint6
 	var count int64
 	err := r.db.db.WithContext(ctx).Model(&quotaWindowModel{}).Where("account_id = ? AND synced_at IS NOT NULL", accountID).Count(&count).Error
 	return count > 0, err
+}
+
+// MigrateQuotaMode replaces one legacy window with canonical model windows.
+// Collisions merge conservatively, so reruns are idempotent and never relax an
+// already observed limit.
+func (r *AccountRepository) MigrateQuotaMode(ctx context.Context, providerValue account.Provider, legacyMode string, replacements []string) (int64, error) {
+	legacyMode = strings.TrimSpace(legacyMode)
+	seen := make(map[string]struct{}, len(replacements))
+	modes := make([]string, 0, len(replacements))
+	for _, value := range replacements {
+		mode := truncate(strings.TrimSpace(value), 64)
+		if mode == "" || mode == legacyMode {
+			continue
+		}
+		if _, exists := seen[mode]; exists {
+			continue
+		}
+		seen[mode] = struct{}{}
+		modes = append(modes, mode)
+	}
+	if !providerValue.IsValid() || legacyMode == "" || len(modes) == 0 {
+		return 0, nil
+	}
+	var migrated int64
+	err := r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var legacy []quotaWindowModel
+		if err := tx.Model(&quotaWindowModel{}).
+			Joins("JOIN provider_accounts AS account ON account.id = account_quota_windows.account_id").
+			Where("account.provider = ? AND account_quota_windows.mode = ?", providerValue, legacyMode).
+			Find(&legacy).Error; err != nil {
+			return err
+		}
+		for _, source := range legacy {
+			for _, mode := range modes {
+				replacement := source
+				replacement.Mode = mode
+				replacement.Account = nil
+				if err := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "account_id"}, {Name: "mode"}},
+					DoUpdates: conservativeQuotaWindowMergeAssignments(),
+				}).Create(&replacement).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Where("account_id = ? AND mode = ?", source.AccountID, legacyMode).Delete(&quotaWindowModel{}).Error; err != nil {
+				return err
+			}
+			migrated++
+		}
+		return nil
+	})
+	return migrated, err
+}
+
+// conservativeQuotaWindowMergeAssignments keeps the most restrictive state
+// when legacy and canonical windows describe the same upstream quota bucket.
+func conservativeQuotaWindowMergeAssignments() clause.Set {
+	return clause.Assignments(map[string]any{
+		"remaining":      gorm.Expr("CASE WHEN excluded.remaining < account_quota_windows.remaining THEN excluded.remaining ELSE account_quota_windows.remaining END"),
+		"total":          gorm.Expr("CASE WHEN excluded.total > account_quota_windows.total THEN excluded.total ELSE account_quota_windows.total END"),
+		"usage_percent":  gorm.Expr("CASE WHEN excluded.usage_percent > account_quota_windows.usage_percent THEN excluded.usage_percent ELSE account_quota_windows.usage_percent END"),
+		"breakdown_json": gorm.Expr("CASE WHEN excluded.remaining < account_quota_windows.remaining OR excluded.usage_percent > account_quota_windows.usage_percent THEN excluded.breakdown_json ELSE account_quota_windows.breakdown_json END"),
+		"window_seconds": gorm.Expr("CASE WHEN excluded.window_seconds > account_quota_windows.window_seconds THEN excluded.window_seconds ELSE account_quota_windows.window_seconds END"),
+		"reset_at":       gorm.Expr("CASE WHEN account_quota_windows.reset_at IS NULL THEN excluded.reset_at WHEN excluded.reset_at IS NULL THEN account_quota_windows.reset_at WHEN excluded.reset_at > account_quota_windows.reset_at THEN excluded.reset_at ELSE account_quota_windows.reset_at END"),
+		"synced_at":      gorm.Expr("CASE WHEN account_quota_windows.synced_at IS NULL THEN excluded.synced_at WHEN excluded.synced_at IS NULL THEN account_quota_windows.synced_at WHEN excluded.synced_at > account_quota_windows.synced_at THEN excluded.synced_at ELSE account_quota_windows.synced_at END"),
+		"source":         gorm.Expr("CASE WHEN account_quota_windows.source = 'upstream' OR excluded.source = 'upstream' THEN 'upstream' WHEN account_quota_windows.source = 'estimated' OR excluded.source = 'estimated' THEN 'estimated' ELSE 'default' END"),
+		"updated_at":     gorm.Expr("CASE WHEN excluded.updated_at > account_quota_windows.updated_at THEN excluded.updated_at ELSE account_quota_windows.updated_at END"),
+	})
 }
 
 func (r *AccountRepository) GetQuotaWindows(ctx context.Context, accountIDs []uint64) (map[uint64][]account.QuotaWindow, error) {

@@ -164,36 +164,37 @@ func shortTeamFingerprint(value string) string {
 	return value[:12]
 }
 
-func (s *Service) activeTeamModelRateLimit(credential accountdomain.Credential, upstreamModel string, now time.Time) (teamModelRateLimit, bool) {
-	teamFingerprint := rateLimitTeamFingerprint(credential.TeamID)
+func (s *Service) activeTeamModelRateLimit(credential accountdomain.Credential, modelKey string, now time.Time) (teamModelRateLimit, bool) {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
-	if teamFingerprint == "" {
-		teamFingerprint = s.rateLimitTeams[credential.ID]
+	learnedFingerprint := s.rateLimitTeams[credential.ID]
+	credentialFingerprint := rateLimitTeamFingerprint(credential.TeamID)
+	for index, teamFingerprint := range []string{learnedFingerprint, credentialFingerprint} {
+		if teamFingerprint == "" || index > 0 && teamFingerprint == learnedFingerprint {
+			continue
+		}
+		key := teamModelRateLimitKey(credential.Provider, teamFingerprint, modelKey)
+		value, ok := s.rateLimits[key]
+		if !ok {
+			continue
+		}
+		if !now.Before(value.Until) {
+			delete(s.rateLimits, key)
+			continue
+		}
+		return value, true
 	}
-	if teamFingerprint == "" {
-		return teamModelRateLimit{}, false
-	}
-	key := teamModelRateLimitKey(credential.Provider, teamFingerprint, upstreamModel)
-	value, ok := s.rateLimits[key]
-	if !ok {
-		return teamModelRateLimit{}, false
-	}
-	if !now.Before(value.Until) {
-		delete(s.rateLimits, key)
-		return teamModelRateLimit{}, false
-	}
-	return value, true
+	return teamModelRateLimit{}, false
 }
 
-func (s *Service) markTeamModelRateLimit(credential accountdomain.Credential, upstreamModel string, metadata provider.RateLimitMetadata, now time.Time) teamModelRateLimit {
+func (s *Service) markTeamModelRateLimit(credential accountdomain.Credential, modelKey string, metadata provider.RateLimitMetadata, now time.Time) teamModelRateLimit {
 	retryAfter := metadata.RetryAfter
 	if retryAfter <= 0 {
 		retryAfter = time.Minute
 	}
 	teamFingerprint := rateLimitTeamFingerprint(metadata.TeamID)
 	value := teamModelRateLimit{TeamFingerprint: shortTeamFingerprint(teamFingerprint), Until: now.Add(retryAfter)}
-	key := teamModelRateLimitKey(credential.Provider, teamFingerprint, upstreamModel)
+	key := teamModelRateLimitKey(credential.Provider, teamFingerprint, modelKey)
 	until := now.Add(retryAfter)
 	s.rateLimitMu.Lock()
 	if s.rateLimits == nil {
@@ -203,8 +204,8 @@ func (s *Service) markTeamModelRateLimit(credential accountdomain.Credential, up
 		s.rateLimitTeams = make(map[uint64]string)
 	}
 	s.rateLimitTeams[credential.ID] = teamFingerprint
-	for existingKey, value := range s.rateLimits {
-		if !now.Before(value.Until) {
+	for existingKey, existing := range s.rateLimits {
+		if !now.Before(existing.Until) {
 			delete(s.rateLimits, existingKey)
 		}
 	}
@@ -447,6 +448,10 @@ func (s *Service) createResponseAt(ctx context.Context, input Input, path string
 	failureFingerprints := make(map[string]int)
 	authRecoveryAttempted := make(map[uint64]bool)
 	quotaMode := s.providers.QuotaMode(route.Provider, route.UpstreamModel)
+	rateLimitModelKey := quotaMode
+	if rateLimitModelKey == "" {
+		rateLimitModelKey = strings.TrimSpace(route.UpstreamModel)
+	}
 	quotaProbeAttempted := false
 	var lastErr error
 	var lastFailure *UpstreamFailure
@@ -483,7 +488,7 @@ attemptLoop:
 			break
 		}
 		excluded[lease.Credential.ID] = true
-		if limited, ok := s.activeTeamModelRateLimit(lease.Credential, route.UpstreamModel, time.Now().UTC()); ok {
+		if limited, ok := s.activeTeamModelRateLimit(lease.Credential, rateLimitModelKey, time.Now().UTC()); ok {
 			lease.Release()
 			lastFailure = &UpstreamFailure{
 				HTTPStatus: http.StatusTooManyRequests, Code: "upstream_rate_limited", PublicMessage: "上游请求频率受限",
@@ -589,16 +594,36 @@ attemptLoop:
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			body, _ := readRetryableBody(response.Body)
 			if egressForbidden {
-				// Web 403/code 7 表示出口浏览器会话被拒绝；Provider 已重建会话并降低节点健康，不应误伤账号。
-				delete(excluded, credential.ID)
+				// Web 403/code 7 也可能由账号或请求签名触发。Provider 负责累计
+				// 出口证据；本次请求改用另一个账号，避免同一可疑组合连续重试。
 				lease.Release()
 				lastErr = fmt.Errorf("Grok Web 出口会话被反机器人规则拒绝")
 				lastFailure = newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)
 				continue
 			}
 			lastFailure = newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)
-			if response.StatusCode == http.StatusTooManyRequests && response.RateLimit != nil && response.RateLimit.TeamID != "" && response.RateLimit.Model == route.UpstreamModel {
-				limited := s.markTeamModelRateLimit(credential, route.UpstreamModel, *response.RateLimit, time.Now().UTC())
+			if response.StatusCode == http.StatusTooManyRequests && retryAfter > 0 {
+				lastFailure.RetryAfter = retryAfter
+			}
+			metadataModelKey := ""
+			if response.RateLimit != nil {
+				metadataModelKey = s.providers.QuotaMode(credential.Provider, response.RateLimit.Model)
+				if metadataModelKey == "" {
+					metadataModelKey = strings.TrimSpace(response.RateLimit.Model)
+				}
+			}
+			if response.StatusCode == http.StatusTooManyRequests && response.RateLimit != nil && response.RateLimit.TeamID != "" && metadataModelKey == rateLimitModelKey {
+				if credential.TeamID != response.RateLimit.TeamID {
+					persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizationTimeout)
+					observeErr := s.accounts.ObserveTeamID(persistCtx, credential.ID, response.RateLimit.TeamID)
+					cancel()
+					if observeErr != nil {
+						s.logger.Warn("upstream_team_identity_persist_failed", "request_id", input.RequestID, "provider", credential.Provider, "account_id", credential.ID, "error", observeErr)
+					} else {
+						s.selector.MarkQuotaStateChanged(credential.Provider)
+					}
+				}
+				limited := s.markTeamModelRateLimit(credential, rateLimitModelKey, *response.RateLimit, time.Now().UTC())
 				lastFailure.AccountScoped = false
 				lastFailure.Fingerprint = "429:team_model_rate_limit"
 				lastFailure.RetryAfter = time.Until(limited.Until)

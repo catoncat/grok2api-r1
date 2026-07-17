@@ -53,7 +53,7 @@ func TestFromFHTTPResponseNormalizesAutoDecompressedHeaders(t *testing.T) {
 			"Content-Type":     []string{"application/json"},
 		},
 		Body: io.NopCloser(strings.NewReader(`{"status":"completed"}`)), ContentLength: 128, Uncompressed: true,
-	})
+	}, nil)
 	if response.Header.Get("Content-Encoding") != "" || response.Header.Get("Content-Length") != "" {
 		t.Fatalf("decoded response headers = %#v", response.Header)
 	}
@@ -71,7 +71,7 @@ func TestFromFHTTPResponsePreservesCompressedHeaders(t *testing.T) {
 		Status: "200 OK", StatusCode: http.StatusOK,
 		Header: fhttp.Header{"Content-Encoding": []string{"gzip"}, "Content-Length": []string{"128"}},
 		Body:   io.NopCloser(bytes.NewReader(nil)), ContentLength: 128,
-	})
+	}, nil)
 	if response.Header.Get("Content-Encoding") != "gzip" || response.Header.Get("Content-Length") != "128" || response.ContentLength != 128 {
 		t.Fatalf("compressed response = headers=%#v contentLength=%d", response.Header, response.ContentLength)
 	}
@@ -85,7 +85,7 @@ func TestFromFHTTPResponseOwnsHeadersAndPreservesDeferredTrailers(t *testing.T) 
 		TransferEncoding: []string{"chunked"},
 		Body:             io.NopCloser(bytes.NewReader(nil)),
 	}
-	response := fromFHTTPResponse(source)
+	response := fromFHTTPResponse(source, nil)
 
 	source.Header.Set("X-Upstream", "mutated")
 	source.TransferEncoding[0] = "identity"
@@ -100,5 +100,25 @@ func TestFromFHTTPResponseOwnsHeadersAndPreservesDeferredTrailers(t *testing.T) 
 	}
 	if response.Trailer.Get("X-Usage") != "42" {
 		t.Fatalf("deferred trailer was lost: %#v", response.Trailer)
+	}
+}
+
+func TestFromFHTTPResponsePreservesOriginalRequestContext(t *testing.T) {
+	type contextKey struct{}
+	original, err := http.NewRequestWithContext(
+		context.WithValue(context.Background(), contextKey{}, uint64(42)),
+		http.MethodPost,
+		"https://grok.com/rest/test",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := fromFHTTPResponse(&fhttp.Response{
+		Status: "200 OK", StatusCode: http.StatusOK,
+		Body: io.NopCloser(bytes.NewReader(nil)),
+	}, original)
+	if response.Request != original || response.Request.Context().Value(contextKey{}) != uint64(42) {
+		t.Fatal("original request context was lost during response conversion")
 	}
 }

@@ -272,7 +272,8 @@ func applyDomainConfig(base config.Config, value settingsdomain.Config) config.C
 		MediaConcurrency: value.ProviderWeb.MediaConcurrency, AllowNSFW: value.ProviderWeb.AllowNSFW,
 		RecoveryBackoffBase: config.Duration(value.ProviderWeb.RecoveryBackoffBase), RecoveryBackoffMax: config.Duration(value.ProviderWeb.RecoveryBackoffMax),
 	}
-	// Console 是后续版本新增的完整配置段；旧 JSON 整段缺失时沿用代码默认值。
+	// Console 是后续版本新增的完整配置段；仅整段缺失时沿用代码默认值，
+	// 部分存在但不完整的配置仍交给 Validate 拒绝。
 	if value.ProviderConsole != (settingsdomain.ProviderConsoleConfig{}) {
 		base.Provider.Console = config.ConsoleProviderConfig{
 			BaseURL: value.ProviderConsole.BaseURL, UserAgent: value.ProviderConsole.UserAgent,

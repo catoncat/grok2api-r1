@@ -6,12 +6,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	egressdomain "github.com/chenyme/grok2api/backend/internal/domain/egress"
@@ -223,7 +227,7 @@ func TestChatImageUploadFeedsFileMetadataIntoConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	content, _ := json.Marshal([]any{
 		map[string]any{"type": "text", "text": "inspect"},
 		map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURI}},
@@ -281,7 +285,7 @@ func TestForwardMessagesWebSearchEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual"}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+			adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 			body, _ := json.Marshal(map[string]any{
 				"model": "public", "max_tokens": 256, "stream": streaming,
 				"messages":    []any{map[string]any{"role": "user", "content": "Perform a web search for the query: rust tutorials"}},
@@ -362,6 +366,101 @@ func (egressRepositoryStub) UpdateEgressNode(context.Context, egressdomain.Node)
 }
 
 func (egressRepositoryStub) DeleteEgressNode(context.Context, uint64) error {
+	return errors.New("unsupported")
+}
+
+type fixedEgressRepositoryStub struct{ nodes []egressdomain.Node }
+
+type trackingEgressRepository struct {
+	mu      sync.Mutex
+	node    egressdomain.Node
+	updates int
+}
+
+type prefixErrorReader struct {
+	data     []byte
+	err      error
+	returned bool
+}
+
+func (r *prefixErrorReader) Read(target []byte) (int, error) {
+	if r.returned {
+		return 0, r.err
+	}
+	r.returned = true
+	return copy(target, r.data), r.err
+}
+
+func (*prefixErrorReader) Close() error { return nil }
+
+func (s *trackingEgressRepository) ListEgressNodes(_ context.Context, scope egressdomain.Scope, _ repository.SortQuery) ([]egressdomain.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.node.Scope != scope {
+		return nil, nil
+	}
+	return []egressdomain.Node{s.node}, nil
+}
+
+func (s *trackingEgressRepository) GetEgressNode(_ context.Context, id uint64) (egressdomain.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.node.ID != id {
+		return egressdomain.Node{}, errors.New("not found")
+	}
+	return s.node, nil
+}
+
+func (s *trackingEgressRepository) CreateEgressNode(context.Context, egressdomain.Node) (egressdomain.Node, error) {
+	return egressdomain.Node{}, errors.New("unsupported")
+}
+
+func (s *trackingEgressRepository) UpdateEgressNode(_ context.Context, node egressdomain.Node) (egressdomain.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.node = node
+	s.updates++
+	return node, nil
+}
+
+func (s *trackingEgressRepository) DeleteEgressNode(context.Context, uint64) error {
+	return errors.New("unsupported")
+}
+
+func (s *trackingEgressRepository) snapshot() (egressdomain.Node, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.node, s.updates
+}
+
+func (s fixedEgressRepositoryStub) ListEgressNodes(_ context.Context, scope egressdomain.Scope, _ repository.SortQuery) ([]egressdomain.Node, error) {
+	values := make([]egressdomain.Node, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		if node.Scope == scope {
+			values = append(values, node)
+		}
+	}
+	return values, nil
+}
+
+func (s fixedEgressRepositoryStub) GetEgressNode(_ context.Context, id uint64) (egressdomain.Node, error) {
+	for _, node := range s.nodes {
+		if node.ID == id {
+			return node, nil
+		}
+	}
+	return egressdomain.Node{}, errors.New("not found")
+}
+
+func (fixedEgressRepositoryStub) CreateEgressNode(context.Context, egressdomain.Node) (egressdomain.Node, error) {
+	return egressdomain.Node{}, errors.New("unsupported")
+}
+
+func (fixedEgressRepositoryStub) UpdateEgressNode(context.Context, egressdomain.Node) (egressdomain.Node, error) {
+	return egressdomain.Node{}, errors.New("unsupported")
+}
+
+func (fixedEgressRepositoryStub) DeleteEgressNode(context.Context, uint64) error {
 	return errors.New("unsupported")
 }
 
@@ -552,9 +651,141 @@ func TestPreflightRejectsInBandErrorBeforeStreaming(t *testing.T) {
 }
 
 func TestPreflightClassifiesAntiBotRejection(t *testing.T) {
-	source := io.NopCloser(strings.NewReader(`{"error":{"message":"Request rejected by anti-bot rules.","code":7,"details":[]}}` + "\n"))
+	source := io.NopCloser(strings.NewReader(`{"error":{"message":"Request rejected by anti-bot rules.","details":[]}}` + "\n"))
 	if _, err := preflightUpstream(source); !errors.Is(err, errWebAntiBot) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPreflightClassifiesCode7WithoutPoisoningAntiBotSignal(t *testing.T) {
+	source := io.NopCloser(strings.NewReader(`{"error":{"message":"Request rejected by anti-bot rules.","code":7}}` + "\n"))
+	if _, err := preflightUpstream(source); !errors.Is(err, errWebCode7) || errors.Is(err, errWebAntiBot) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLiteCode7WithAntiBotTextRetriesWithoutEgressFeedback(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(writer, `{"error":{"message":"Request rejected by anti-bot rules.","code":7}}`)
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 7, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	_, err = adapter.generateLiteImageURL(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token}, ModelSpec{Mode: "fast"}, "draw")
+	if err == nil || calls.Load() != 2 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestLiteAntiBotStillFeedsEgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(writer, `{"error":{"message":"Request rejected by anti-bot rules."}}`)
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 8, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	for range 2 {
+		_, _ = adapter.generateLiteImageURL(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token}, ModelSpec{Mode: "fast"}, "draw")
+	}
+	node, updates := repository.snapshot()
+	if updates != 2 || node.Health >= 1 || node.FailureCount != 2 || node.LastError != "anti-bot rejection" {
+		t.Fatalf("anti-bot feedback node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestPostSignedJSONCode7RetriesWithoutEgressFeedback(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(writer, `{"error":{"message":"signature rejected","code":7}}`)
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 9, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	manager := infraegress.NewManager(repository, cipher)
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, manager, cipher, nil, nil)
+	lease, err := manager.Acquire(context.Background(), egressdomain.ScopeWeb, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	response, err := adapter.postSignedJSON(context.Background(), adapter.config(), lease, "test-sso", server.URL+"/post", map[string]string{"x": "y"}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, readErr := io.ReadAll(response.Body)
+	if readErr != nil || response.StatusCode != http.StatusForbidden || calls.Load() != 2 || !bytes.Contains(body, []byte(`"code":7`)) {
+		t.Fatalf("status=%d calls=%d body=%q err=%v", response.StatusCode, calls.Load(), body, readErr)
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestPeekWebResponseErrorReplaysLongBody(t *testing.T) {
+	prefix := `{"error":{"message":"signature rejected","code":7}}`
+	body := prefix + strings.Repeat("x", 2<<20)
+	replayed, err := peekWebResponseError(io.NopCloser(strings.NewReader(body)), int64(len(prefix)))
+	if !errors.Is(err, errWebCode7) {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := io.ReadAll(replayed)
+	if readErr != nil || string(got) != body {
+		t.Fatalf("replayed len=%d want=%d err=%v", len(got), len(body), readErr)
+	}
+}
+
+func TestPeekWebResponseErrorReplaysBytesAfterReadError(t *testing.T) {
+	readErr := errors.New("upstream read interrupted")
+	source := &prefixErrorReader{data: []byte(`{"error":{"message":"partial"`), err: readErr}
+	replayed, err := peekWebResponseError(source, 1<<20)
+	if !errors.Is(err, readErr) {
+		t.Fatalf("peek error = %v", err)
+	}
+	got, replayErr := io.ReadAll(replayed)
+	if string(got) != `{"error":{"message":"partial"` || !errors.Is(replayErr, readErr) {
+		t.Fatalf("replayed=%q error=%v", got, replayErr)
+	}
+}
+
+func TestImagineWebSocketErrorClassifiesCode7BeforeAntiBotText(t *testing.T) {
+	code7 := imagineWebSocketError(map[string]any{"type": "error", "message": "Request rejected by anti-bot rules.", "code": float64(7)})
+	if !errors.Is(code7, errWebCode7) || errors.Is(code7, errWebAntiBot) {
+		t.Fatalf("code 7 error = %v", code7)
+	}
+	antiBot := imagineWebSocketError(map[string]any{"type": "error", "message": "Request rejected by anti-bot rules."})
+	if !errors.Is(antiBot, errWebAntiBot) || errors.Is(antiBot, errWebCode7) {
+		t.Fatalf("anti-bot error = %v", antiBot)
 	}
 }
 
@@ -643,14 +874,139 @@ func TestGeneratedImageAssetHostsRemainStrict(t *testing.T) {
 	}
 }
 
+func TestGeneratedImageDirectDownloadCarriesSessionIdentity(t *testing.T) {
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedToken, err := cipher.Encrypt("token-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedCookie, err := cipher.Encrypt("cf_clearance=clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := infraegress.NewManager(fixedEgressRepositoryStub{nodes: []egressdomain.Node{{
+		ID: 9, Name: "asset", Scope: egressdomain.ScopeWebAsset, Enabled: true, Health: 1,
+		UserAgent: "test-agent", EncryptedCloudflareCookie: encryptedCookie,
+	}}}, cipher)
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.Hostname() != "assets.grok.com" || request.Header.Get("User-Agent") != "test-agent" {
+			t.Fatalf("request host=%q User-Agent=%q", request.URL.Hostname(), request.Header.Get("User-Agent"))
+		}
+		cookie := request.Header.Get("Cookie")
+		for _, expected := range []string{"sso=token-value", "sso-rw=token-value", "cf_clearance=clear"} {
+			if !strings.Contains(cookie, expected) {
+				t.Fatalf("direct asset cookie missing %q", expected)
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK, Status: "200 OK", Header: http.Header{"Content-Type": []string{"image/jpeg"}},
+			Body: io.NopCloser(strings.NewReader("image-bytes")),
+		}, nil
+	})}
+	adapter := &Adapter{egress: manager, cipher: cipher, assetClient: client}
+	raw, err := adapter.downloadImage(context.Background(), account.Credential{ID: 31, EncryptedAccessToken: encryptedToken}, "https://assets.grok.com/generated/test.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || string(raw) != "image-bytes" {
+		t.Fatalf("calls=%d raw=%q", calls, raw)
+	}
+}
+
+func TestGeneratedImageDirectNotFoundDoesNotRetryThroughEgress(t *testing.T) {
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedToken, err := cipher.Encrypt("token-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := infraegress.NewManager(fixedEgressRepositoryStub{nodes: []egressdomain.Node{{
+		ID: 9, Name: "asset", Scope: egressdomain.ScopeWebAsset, Enabled: true, Health: 1,
+		UserAgent: "test-agent",
+	}}}, cipher)
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader("missing")),
+		}, nil
+	})}
+	adapter := &Adapter{egress: manager, cipher: cipher, assetClient: client}
+	_, err = adapter.downloadImage(context.Background(), account.Credential{ID: 31, EncryptedAccessToken: encryptedToken}, "https://assets.grok.com/generated/missing.jpg")
+	if err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("download error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("direct calls = %d, want 1", calls)
+	}
+}
+
+func TestGeneratedImageDirectInvalidContentDoesNotRetryThroughEgress(t *testing.T) {
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedToken, err := cipher.Encrypt("token-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := infraegress.NewManager(fixedEgressRepositoryStub{nodes: []egressdomain.Node{{
+		ID: 9, Name: "asset", Scope: egressdomain.ScopeWebAsset, Enabled: true, Health: 1,
+		UserAgent: "test-agent",
+	}}}, cipher)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		calls++
+		cancel()
+		return &http.Response{
+			StatusCode: http.StatusOK, Status: "200 OK", Header: http.Header{"Content-Type": []string{"text/html"}},
+			Body: io.NopCloser(strings.NewReader("not an image")),
+		}, nil
+	})}
+	adapter := &Adapter{egress: manager, cipher: cipher, assetClient: client}
+	_, err = adapter.downloadImage(ctx, account.Credential{ID: 31, EncryptedAccessToken: encryptedToken}, "https://assets.grok.com/generated/not-an-image.jpg")
+	if !errors.Is(err, errInvalidGeneratedImageResponse) {
+		t.Fatalf("download error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("direct calls = %d, want 1", calls)
+	}
+}
+
+func TestGeneratedImageDirectFallbackPolicy(t *testing.T) {
+	if !shouldFallbackDirectImage(http.StatusForbidden, nil) {
+		t.Fatal("403 must fall back to the configured image egress")
+	}
+	if !shouldFallbackDirectImage(0, errors.New("transport failed")) {
+		t.Fatal("transport failures must fall back to the configured image egress")
+	}
+	if shouldFallbackDirectImage(http.StatusOK, fmt.Errorf("%w: text/html", errInvalidGeneratedImageResponse)) {
+		t.Fatal("invalid content received over HTTP must not spend residential bandwidth on a duplicate download")
+	}
+	if shouldFallbackDirectImage(http.StatusNotFound, nil) || shouldFallbackDirectImage(http.StatusInternalServerError, nil) {
+		t.Fatal("non-auth HTTP failures must not spend residential bandwidth on a duplicate download")
+	}
+}
+
 func TestImageStreamExtensionEventsAndPayloads(t *testing.T) {
 	adapter := &Adapter{assets: imageAssetStoreStub{}}
 	urlItem, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{URL: "https://imgen.x.ai/image.jpg", Blob: "aW1hZ2U="}, "url")
 	if err != nil || urlItem["url"] != "https://api.example/v1/media/images/img_test" || urlItem["mime_type"] != "image/jpeg" || urlItem["revised_prompt"] != "" {
 		t.Fatalf("url item = %#v, err=%v", urlItem, err)
 	}
-	b64Item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: "aW1hZ2U="}, "b64_json")
-	if err != nil || b64Item["b64_json"] != "aW1hZ2U=" || b64Item["mime_type"] != "image/jpeg" {
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	b64Item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: png}, "b64_json")
+	if err != nil || b64Item["b64_json"] != png || b64Item["mime_type"] != "image/png" {
 		t.Fatalf("base64 item = %#v, err=%v", b64Item, err)
 	}
 	var output bytes.Buffer
@@ -658,6 +1014,22 @@ func TestImageStreamExtensionEventsAndPayloads(t *testing.T) {
 	value := output.String()
 	if !strings.Contains(value, "event: image_generation.failed") || !strings.Contains(value, `"id":"imggen_test"`) || !strings.Contains(value, `"code":"upstream_error"`) {
 		t.Fatalf("failure event = %q", value)
+	}
+}
+
+func TestImageDataItemBase64BypassesStorage(t *testing.T) {
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	store := &imageAssetStoreRetryStub{}
+	adapter := &Adapter{assets: store}
+	item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: png}, "b64_json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item["b64_json"] != png || item["mime_type"] != "image/png" {
+		t.Fatalf("base64 item = %#v", item)
+	}
+	if store.calls != 0 {
+		t.Fatalf("base64 output touched storage %d times", store.calls)
 	}
 }
 
