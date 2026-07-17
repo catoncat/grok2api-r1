@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -17,14 +18,24 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
+const s3WriteProbeTTL = time.Minute
+
+type s3API interface {
+	PutObject(context.Context, *s3.PutObjectInput, ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+	GetObject(context.Context, *s3.GetObjectInput, ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+	DeleteObject(context.Context, *s3.DeleteObjectInput, ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+}
+
 // S3Store implements MediaObjectStorage using an S3-compatible endpoint
 // (Tencent COS, AWS S3, MinIO, etc.). Images are stored as objects with
 // a configurable prefix and served via a public base URL.
 type S3Store struct {
-	client       *s3.Client
-	bucket       string
-	prefix       string
+	client        s3API
+	bucket        string
+	prefix        string
 	publicBaseURL string // e.g. https://bucket.cos.region.myqcloud.com
+	healthMu      sync.Mutex
+	healthAt      time.Time
 }
 
 type S3Config struct {
@@ -60,9 +71,9 @@ func NewS3Store(cfg S3Config) (*S3Store, error) {
 		o.UsePathStyle = false
 	})
 	return &S3Store{
-		client:       client,
-		bucket:       cfg.Bucket,
-		prefix:       strings.TrimSuffix(strings.TrimSpace(cfg.Prefix), "/"),
+		client:        client,
+		bucket:        cfg.Bucket,
+		prefix:        strings.TrimSuffix(strings.TrimSpace(cfg.Prefix), "/"),
 		publicBaseURL: strings.TrimRight(strings.TrimSpace(cfg.PublicBaseURL), "/"),
 	}, nil
 }
@@ -78,7 +89,7 @@ func (s *S3Store) SaveImage(ctx context.Context, id, mimeType string, data []byt
 	storageKey := s.key(id[:2], id+extension)
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
-		Key:         aws.String(storageKey),
+		Key:         aws.String(s.fullKey(storageKey)),
 		Body:        bytes.NewReader(data),
 		ContentType: aws.String(mimeType),
 		// public-read so clients can download without going through the VPS
@@ -143,12 +154,32 @@ func (s *S3Store) fullKey(storageKey string) string {
 	return s.prefix + "/" + storageKey
 }
 
-// Ping verifies connectivity with a head request.
+// Ping verifies the same write, public ACL, and delete permissions used by media delivery.
 func (s *S3Store) Ping(ctx context.Context) error {
+	s.healthMu.Lock()
+	if !s.healthAt.IsZero() && time.Since(s.healthAt) < s3WriteProbeTTL {
+		s.healthMu.Unlock()
+		return nil
+	}
+	s.healthMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{
+	key := s.fullKey(s.key(".grok2api-health", "write-probe"))
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(nil),
+		ACL:    types.ObjectCannedACLPublicRead,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("S3 写入探测失败: %w", err)
+	}
+	if _, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)}); err != nil {
+		return fmt.Errorf("S3 清理探测对象失败: %w", err)
+	}
+	s.healthMu.Lock()
+	s.healthAt = time.Now()
+	s.healthMu.Unlock()
+	return nil
 }

@@ -139,7 +139,7 @@ func readinessSnapshot(
 		return snapshot
 	}
 	snapshot.Components["runtime_store"] = httpserver.ReadinessComponent{State: "ready"}
-	healthCtx, cancel = context.WithTimeout(ctx, time.Second)
+	healthCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
 	err = mediaHealth(healthCtx)
 	cancel()
 	if err != nil {
