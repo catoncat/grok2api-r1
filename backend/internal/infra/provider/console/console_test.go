@@ -186,6 +186,37 @@ func TestNormalizeRequestMapsOpenAISearchPreviewToConsoleWebSearch(t *testing.T)
 	}
 }
 
+func TestNormalizeRequestDoesNotInjectHostedSearchBesideSameNamedFunction(t *testing.T) {
+	spec, ok := Resolve("grok-4.3")
+	if !ok {
+		t.Fatal("grok-4.3 missing")
+	}
+	body, err := normalizeRequest([]byte(`{
+		"model":"grok-4.3",
+		"input":"search",
+		"tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}]
+	}`), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 || toolIdentity(tools[0]) != "function:web_search" || toolIdentity(tools[1]) != "x_search" {
+		t.Fatalf("tools = %#v", tools)
+	}
+	names := make(map[string]bool)
+	for _, tool := range tools {
+		name := toolUpstreamName(tool)
+		if names[name] {
+			t.Fatalf("duplicate upstream tool name %q in %#v", name, tools)
+		}
+		names[name] = true
+	}
+}
+
 func TestConsoleImportAcceptsJSONPlainTextAndCookieFormat(t *testing.T) {
 	values, err := parseImportedCredentials([]byte("sso=token-one; sso-rw=token-one\ntoken-two\ntoken-two\n"))
 	if err != nil {

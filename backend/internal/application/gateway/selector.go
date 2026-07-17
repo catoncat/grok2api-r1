@@ -26,6 +26,7 @@ type accountLease struct {
 const quotaProbeLease = 5 * time.Minute
 const successPersistInterval = 30 * time.Second
 const candidateCacheTTL = time.Second
+const modelPermissionProbeInterval = 24 * time.Hour
 
 type candidateSnapshot struct {
 	values    []account.RoutingCandidate
@@ -430,6 +431,21 @@ func (s *Selector) MarkModelQuotaExhausted(ctx context.Context, credential accou
 	until := time.Now().UTC().Add(retryAfter)
 	_ = s.accounts.UpsertModelQuotaBlock(ctx, account.ModelQuotaBlock{
 		AccountID: credential.ID, UpstreamModel: upstreamModel, Reason: "model_quota_depleted", CooldownUntil: until, UpdatedAt: time.Now().UTC(),
+	})
+	s.invalidateCandidates(credential.Provider)
+}
+
+// MarkModelPermissionDenied keeps a valid credential available for other models while
+// backing off the denied model until its upstream entitlement can be probed again.
+func (s *Selector) MarkModelPermissionDenied(ctx context.Context, credential account.Credential, upstreamModel string) {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if upstreamModel == "" {
+		return
+	}
+	now := time.Now().UTC()
+	_ = s.accounts.UpsertModelQuotaBlock(ctx, account.ModelQuotaBlock{
+		AccountID: credential.ID, UpstreamModel: upstreamModel, Reason: "model_permission_denied",
+		CooldownUntil: now.Add(modelPermissionProbeInterval), UpdatedAt: now,
 	})
 	s.invalidateCandidates(credential.Provider)
 }

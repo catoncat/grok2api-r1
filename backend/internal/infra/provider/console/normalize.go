@@ -98,6 +98,7 @@ func mergeSearchTools(payload map[string]any) error {
 		map[string]any{"type": "x_search", "enable_video_understanding": true},
 	}
 	positions := map[string]int{"web_search": 0, "x_search": 1}
+	defaultPositions := map[int]bool{0: true, 1: true}
 	result := append([]any(nil), defaults...)
 	if value, exists := payload["tools"]; exists && value != nil {
 		tools, ok := value.([]any)
@@ -106,9 +107,13 @@ func mergeSearchTools(payload map[string]any) error {
 		}
 		for _, tool := range tools {
 			tool = normalizeSearchToolAlias(tool)
-			identity := toolIdentity(tool)
+			identity := toolUpstreamName(tool)
 			if index, exists := positions[identity]; identity != "" && exists {
+				if !defaultPositions[index] && toolIdentity(result[index]) != toolIdentity(tool) {
+					return fmt.Errorf("Console tools 包含重复的上游工具名 %q", identity)
+				}
 				result[index] = tool
+				delete(defaultPositions, index)
 				continue
 			}
 			if identity != "" {
@@ -124,6 +129,19 @@ func mergeSearchTools(payload map[string]any) error {
 		payload["tool_choice"] = normalizeSearchToolAlias(payload["tool_choice"])
 	}
 	return nil
+}
+
+func toolUpstreamName(value any) string {
+	tool, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	typeName, _ := tool["type"].(string)
+	if typeName == "function" {
+		name, _ := tool["name"].(string)
+		return strings.TrimSpace(name)
+	}
+	return strings.TrimSpace(typeName)
 }
 
 func normalizeSearchToolAlias(value any) any {

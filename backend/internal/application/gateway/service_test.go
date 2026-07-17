@@ -746,6 +746,63 @@ func TestGatewayRefreshesAndRetriesBuildPermissionDenialOnce(t *testing.T) {
 	}
 }
 
+func TestGatewayCoolsOnlyBuildModelWhenPermissionDenialSurvivesRefresh(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "model-permission.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	responseRepo := relational.NewResponseRepository(database)
+	credential, _, err := accountRepo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderBuild, Name: "model-denied", SourceKey: "model-denied",
+		EncryptedAccessToken: "access-old", EncryptedRefreshToken: "refresh-old", ExpiresAt: time.Now().Add(time.Hour),
+		Enabled: true, AuthStatus: account.AuthStatusActive, Priority: 100, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.UpsertDiscovered(ctx, account.ProviderBuild, []string{"grok-denied"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"grok-denied"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	clientKey := clientkey.Key{Name: "model-denied-key", Enabled: true, RPMLimit: 120, MaxConcurrent: 8}
+	adapter := &authRescueAdapter{permissionDeniedAll: true}
+	registry := provider.NewRegistry(adapter)
+	sticky := memory.NewStickyStore()
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
+	selector := NewSelector(accountRepo, memory.NewConcurrencyLimiter(), sticky, registry, time.Hour, time.Second, time.Minute)
+	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 2)
+
+	_, err = service.CreateResponse(ctx, Input{
+		RequestID: "req-model-denied", ClientKey: clientKey, PublicModel: "grok-denied",
+		Body: []byte(`{"model":"grok-denied","input":"hello"}`),
+	})
+	var upstreamFailure *UpstreamFailure
+	if !errors.As(err, &upstreamFailure) || upstreamFailure.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("error = %T %v", err, err)
+	}
+	updated, err := accountRepo.Get(ctx, credential.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AuthStatus != account.AuthStatusActive || adapter.refreshes.Load() != 1 {
+		t.Fatalf("credential = %#v, refreshes = %d", updated, adapter.refreshes.Load())
+	}
+	candidates, err := accountRepo.ListRoutingCandidates(ctx, account.ProviderBuild, "grok-denied", "")
+	if err != nil || len(candidates) != 1 || candidates[0].ModelQuotaBlock == nil || candidates[0].ModelQuotaBlock.Reason != "model_permission_denied" {
+		t.Fatalf("candidates = %#v, err = %v", candidates, err)
+	}
+}
+
 func TestWebRateLimitExhaustsOnlyRequestedQuotaMode(t *testing.T) {
 	ctx := context.Background()
 	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "web-rate-limit.db"))
@@ -1347,9 +1404,10 @@ type systemicForbiddenAdapter struct {
 }
 
 type authRescueAdapter struct {
-	attempts  atomic.Int64
-	refreshes atomic.Int64
-	rejectAll atomic.Bool
+	attempts            atomic.Int64
+	refreshes           atomic.Int64
+	rejectAll           atomic.Bool
+	permissionDeniedAll bool
 }
 
 func (a *authRescueAdapter) Provider() account.Provider { return account.ProviderBuild }
@@ -1364,7 +1422,7 @@ func (a *authRescueAdapter) ForwardResponse(_ context.Context, request provider.
 			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unauthorized","message":"access token rejected"}}`)),
 		}, nil
 	}
-	if request.Credential.EncryptedAccessToken == "access-old" {
+	if a.permissionDeniedAll || request.Credential.EncryptedAccessToken == "access-old" {
 		return &provider.Response{
 			StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header),
 			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"permission_denied","message":"Access to the chat endpoint is denied"}}`)),

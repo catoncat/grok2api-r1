@@ -661,7 +661,11 @@ attemptLoop:
 			} else if lastFailure.QuotaExhausted {
 				failureHandled = s.selector.MarkPaidQuotaExhausted(ctx, credential, lease.Billing)
 			}
-			if s.providers.SupportsCredentialRefresh(credential.Provider) && lastFailure.PermanentAccountDenial {
+			if credential.Provider == accountdomain.ProviderBuild && lastFailure.PermanentAccountDenial {
+				s.selector.MarkModelPermissionDenied(ctx, credential, route.UpstreamModel)
+				s.selector.MarkQuotaStateChanged(credential.Provider)
+				failureHandled = true
+			} else if s.providers.SupportsCredentialRefresh(credential.Provider) && lastFailure.PermanentAccountDenial {
 				_ = s.accounts.MarkReauthRequired(ctx, credential.ID, fmt.Sprintf("%s chat endpoint access denied", credential.Provider))
 				s.selector.MarkQuotaStateChanged(credential.Provider)
 				failureHandled = true
