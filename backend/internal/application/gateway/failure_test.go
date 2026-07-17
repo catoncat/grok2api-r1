@@ -15,6 +15,7 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 		body                   string
 		accountScoped          bool
 		permanentAccountDenial bool
+		modelPermissionDenied  bool
 		quotaExhausted         bool
 		freeQuotaExhausted     bool
 		modelQuotaExhausted    bool
@@ -22,7 +23,15 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 	}{
 		{
 			name: "top-level permanent chat denial", body: `{"status_code":403,"error":"Access to the chat endpoint is denied. Please update the permissions."}`,
-			accountScoped: true, permanentAccountDenial: true,
+			accountScoped: true, permanentAccountDenial: true, modelPermissionDenied: true,
+		},
+		{
+			name: "model permission denial", body: `{"error":{"code":"permission_denied","message":"Access to the chat endpoint is denied"}}`,
+			accountScoped: true, permanentAccountDenial: true, modelPermissionDenied: true, upstreamCode: "permission_denied",
+		},
+		{
+			name: "production top-level hyphenated model permission denial", body: `{"code":"permission-denied","error":"Access to the chat endpoint is denied. Please update the permissions."}`,
+			accountScoped: true, permanentAccountDenial: true, modelPermissionDenied: true, upstreamCode: "permission-denied",
 		},
 		{
 			name: "spending limit", body: `{"code":"personal-team-blocked:spending-limit","error":"quota exhausted"}`,
@@ -32,6 +41,14 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 			name: "unknown policy rejection", body: `{"error":"upstream policy rejected request"}`,
 		},
 		{
+			name: "other code cannot claim model permission", body: `{"error":{"code":"account_suspended","message":"Access to the chat endpoint is denied"}}`,
+			accountScoped: true, permanentAccountDenial: true, upstreamCode: "account_suspended",
+		},
+		{
+			name: "generic access denied is not model permission", body: `{"error":"access denied"}`,
+			accountScoped: true, permanentAccountDenial: true,
+		},
+		{
 			name: "free model quota", body: `{"error":"You've used all the included free usage for model grok-build"}`,
 			accountScoped: true, quotaExhausted: true, freeQuotaExhausted: true, modelQuotaExhausted: true,
 		},
@@ -39,7 +56,7 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			failure := newHTTPUpstreamFailure(http.StatusForbidden, []byte(test.body), 42, "build")
-			if failure.HTTPStatus != http.StatusForbidden || failure.Code != "upstream_forbidden" || failure.AccountScoped != test.accountScoped || failure.PermanentAccountDenial != test.permanentAccountDenial || failure.QuotaExhausted != test.quotaExhausted || failure.FreeQuotaExhausted != test.freeQuotaExhausted || failure.ModelQuotaExhausted != test.modelQuotaExhausted || failure.UpstreamCode != test.upstreamCode {
+			if failure.HTTPStatus != http.StatusForbidden || failure.Code != "upstream_forbidden" || failure.AccountScoped != test.accountScoped || failure.PermanentAccountDenial != test.permanentAccountDenial || failure.ModelPermissionDenied != test.modelPermissionDenied || failure.QuotaExhausted != test.quotaExhausted || failure.FreeQuotaExhausted != test.freeQuotaExhausted || failure.ModelQuotaExhausted != test.modelQuotaExhausted || failure.UpstreamCode != test.upstreamCode {
 				t.Fatalf("failure = %#v", failure)
 			}
 		})

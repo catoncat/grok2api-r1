@@ -600,9 +600,21 @@ attemptLoop:
 				continue
 			}
 		}
+		responseRetryable := isRetryableResponse(response)
+		if !responseRetryable && credential.Provider == accountdomain.ProviderBuild && response.StatusCode == http.StatusForbidden {
+			body, replay, _, readErr := readResponseBody(response.Body)
+			response.Body = replay
+			if readErr == nil {
+				terminalFailure := newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)
+				if terminalFailure.ModelPermissionDenied {
+					s.selector.MarkModelPermissionDenied(ctx, credential, route.UpstreamModel)
+					s.selector.MarkQuotaStateChanged(credential.Provider)
+				}
+			}
+		}
 		egressForbidden := s.providers.RetryForbiddenAsEgress(credential.Provider) && response.StatusCode == http.StatusForbidden
 		finalEgressForbidden := egressForbidden && (attempt > 0 || attempt+1 >= attempts)
-		if isRetryableResponse(response) && !finalEgressForbidden {
+		if responseRetryable && !finalEgressForbidden {
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			body, _ := readRetryableBody(response.Body)
 			if egressForbidden {
@@ -684,7 +696,11 @@ attemptLoop:
 			} else if lastFailure.QuotaExhausted {
 				failureHandled = s.selector.MarkPaidQuotaExhausted(ctx, credential, lease.Billing)
 			}
-			if s.providers.SupportsCredentialRefresh(credential.Provider) && lastFailure.PermanentAccountDenial {
+			if credential.Provider == accountdomain.ProviderBuild && lastFailure.ModelPermissionDenied {
+				s.selector.MarkModelPermissionDenied(ctx, credential, route.UpstreamModel)
+				s.selector.MarkQuotaStateChanged(credential.Provider)
+				failureHandled = true
+			} else if s.providers.SupportsCredentialRefresh(credential.Provider) && lastFailure.PermanentAccountDenial {
 				_ = s.accounts.MarkReauthRequired(ctx, credential.ID, fmt.Sprintf("%s chat endpoint access denied", credential.Provider))
 				s.selector.MarkQuotaStateChanged(credential.Provider)
 				failureHandled = true

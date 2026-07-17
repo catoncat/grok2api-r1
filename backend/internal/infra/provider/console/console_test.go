@@ -263,6 +263,78 @@ func TestNormalizeRequestMapsOpenAISearchPreviewToConsoleWebSearch(t *testing.T)
 	}
 }
 
+func TestNormalizeRequestDoesNotInjectHostedSearchBesideSameNamedFunction(t *testing.T) {
+	spec, ok := Resolve("grok-4.3")
+	if !ok {
+		t.Fatal("grok-4.3 missing")
+	}
+	body, err := normalizeRequest([]byte(`{
+		"model":"grok-4.3",
+		"input":"search",
+		"tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}]
+	}`), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 || toolIdentity(tools[0]) != "function:web_search" || toolIdentity(tools[1]) != "x_search" {
+		t.Fatalf("tools = %#v", tools)
+	}
+	names := make(map[string]bool)
+	for _, tool := range tools {
+		name := toolUpstreamName(tool)
+		if names[name] {
+			t.Fatalf("duplicate upstream tool name %q in %#v", name, tools)
+		}
+		names[name] = true
+	}
+}
+
+func TestNormalizeRequestRejectsHostedChoiceReplacedBySameNamedFunction(t *testing.T) {
+	spec, ok := Resolve("grok-4.3")
+	if !ok {
+		t.Fatal("grok-4.3 missing")
+	}
+	for _, choice := range []string{`{"type":"web_search"}`, `"web_search"`} {
+		_, err := normalizeRequest([]byte(`{
+			"model":"grok-4.3",
+			"input":"search",
+			"tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}],
+			"tool_choice":`+choice+`
+		}`), spec)
+		if err == nil || !strings.Contains(err.Error(), "tool_choice") {
+			t.Fatalf("choice %s: error = %v", choice, err)
+		}
+	}
+}
+
+func TestNormalizeRequestKeepsUnsupportedToolChoiceCompatibilityFallback(t *testing.T) {
+	spec, ok := Resolve("grok-4.3")
+	if !ok {
+		t.Fatal("grok-4.3 missing")
+	}
+	body, err := normalizeRequest([]byte(`{
+		"model":"grok-4.3",
+		"input":"search",
+		"tools":[{"type":"tool_search"}],
+		"tool_choice":{"type":"tool_search"}
+	}`), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %#v", payload["tool_choice"])
+	}
+}
+
 func TestConsoleImportAcceptsJSONPlainTextAndCookieFormat(t *testing.T) {
 	values, err := parseImportedCredentials([]byte("sso=token-one; sso-rw=token-one\ntoken-two\ntoken-two\n"))
 	if err != nil {
@@ -415,6 +487,88 @@ func TestAdapterForwardsConsoleHeadersAndNormalizedBody(t *testing.T) {
 	}
 	if received["model"] != "grok-4.3" || received["store"] != false || received["metadata"] != nil {
 		t.Fatalf("received = %#v", received)
+	}
+}
+
+func TestAdapterForwardsOnlyOneSearchToolPerUpstreamName(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		operation string
+		body      string
+	}{
+		{
+			name: "responses from Pi", operation: conversation.OperationResponses,
+			body: `{"model":"grok-4.3","input":"hello","tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}]}`,
+		},
+		{
+			name: "chat compatibility", operation: conversation.OperationChat,
+			body: `{"model":"grok-4.3","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"web_search","parameters":{"type":"object"}}}]}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var received map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(writer, `{"id":"resp_console","object":"response","status":"completed","output":[]}`)
+			}))
+			defer server.Close()
+
+			adapter, credential := newConsoleTestAdapter(t, server.URL)
+			response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
+				Credential: credential, Method: http.MethodPost, Path: "/responses", Model: "grok-4.3",
+				Operation: test.operation, NormalizeBody: true, Body: []byte(test.body),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+
+			tools, _ := received["tools"].([]any)
+			if len(tools) != 2 || toolIdentity(tools[0]) != "function:web_search" || toolIdentity(tools[1]) != "x_search" {
+				t.Fatalf("upstream tools = %#v", tools)
+			}
+			names := make(map[string]bool)
+			for _, tool := range tools {
+				name := toolUpstreamName(tool)
+				if names[name] {
+					t.Fatalf("duplicate upstream tool name %q in %#v", name, tools)
+				}
+				names[name] = true
+			}
+		})
+	}
+}
+
+func TestAdapterRejectsHostedChoiceReplacedBySameNamedFunctionBeforeUpstream(t *testing.T) {
+	upstreamCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	adapter, credential := newConsoleTestAdapter(t, server.URL)
+
+	for _, choice := range []string{`{"type":"web_search"}`, `"web_search"`} {
+		response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
+			Credential: credential, Method: http.MethodPost, Path: "/responses", Model: "grok-4.3",
+			Operation: conversation.OperationResponses, NormalizeBody: true,
+			Body: []byte(`{"model":"grok-4.3","input":"hello","tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}],"tool_choice":` + choice + `}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("choice %s: status = %d", choice, response.StatusCode)
+		}
+	}
+	if upstreamCalls != 0 {
+		t.Fatalf("upstream calls = %d", upstreamCalls)
 	}
 }
 

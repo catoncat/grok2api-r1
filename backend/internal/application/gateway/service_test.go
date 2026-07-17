@@ -799,6 +799,124 @@ func TestGatewayRefreshesAndRetriesBuildPermissionDenialOnce(t *testing.T) {
 	}
 }
 
+func TestGatewayCoolsOnlyBuildModelForRetryableAndTerminalPermissionDenials(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "model-permission.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	responseRepo := relational.NewResponseRepository(database)
+	credential, _, err := accountRepo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderBuild, Name: "model-denied", SourceKey: "model-denied",
+		EncryptedAccessToken: "access-old", EncryptedRefreshToken: "refresh-old", ExpiresAt: time.Now().Add(time.Hour),
+		Enabled: true, AuthStatus: account.AuthStatusActive, Priority: 100, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.UpsertDiscovered(ctx, account.ProviderBuild, []string{"grok-denied", "grok-terminal", "grok-allowed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"grok-denied", "grok-terminal", "grok-allowed"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	clientKey := clientkey.Key{Name: "model-denied-key", Enabled: true, RPMLimit: 120, MaxConcurrent: 8}
+	adapter := &authRescueAdapter{permissionDeniedModel: "grok-denied"}
+	registry := provider.NewRegistry(adapter)
+	sticky := memory.NewStickyStore()
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
+	selector := NewSelector(accountRepo, memory.NewConcurrencyLimiter(), sticky, registry, time.Hour, time.Second, time.Minute)
+	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 2)
+
+	_, err = service.CreateResponse(ctx, Input{
+		RequestID: "req-model-denied", ClientKey: clientKey, PublicModel: "grok-denied",
+		Body: []byte(`{"model":"grok-denied","input":"hello"}`),
+	})
+	var upstreamFailure *UpstreamFailure
+	if !errors.As(err, &upstreamFailure) || upstreamFailure.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("error = %T %v", err, err)
+	}
+	updated, err := accountRepo.Get(ctx, credential.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AuthStatus != account.AuthStatusActive || adapter.refreshes.Load() != 1 {
+		t.Fatalf("credential = %#v, refreshes = %d", updated, adapter.refreshes.Load())
+	}
+	candidates, err := accountRepo.ListRoutingCandidates(ctx, account.ProviderBuild, "grok-denied", "")
+	if err != nil || len(candidates) != 1 || candidates[0].ModelQuotaBlock == nil || candidates[0].ModelQuotaBlock.Reason != "model_permission_denied" {
+		t.Fatalf("candidates = %#v, err = %v", candidates, err)
+	}
+	remaining := time.Until(candidates[0].ModelQuotaBlock.CooldownUntil)
+	if remaining < 23*time.Hour+59*time.Minute || remaining > 24*time.Hour+time.Minute {
+		t.Fatalf("model permission cooldown = %s", remaining)
+	}
+	adapter.permissionDeniedModel = "grok-terminal"
+	adapter.terminalPermissionDenied.Store(true)
+	terminal, err := service.CreateResponse(ctx, Input{
+		RequestID: "req-model-terminal", ClientKey: clientKey, PublicModel: "grok-terminal",
+		Body: []byte(`{"model":"grok-terminal","input":"hello"}`),
+	})
+	if err != nil || terminal.StatusCode != http.StatusForbidden {
+		t.Fatalf("terminal response = %#v, err = %v", terminal, err)
+	}
+	terminalBody, err := io.ReadAll(terminal.Body)
+	if err != nil || string(terminalBody) != terminalPermissionDeniedBody {
+		t.Fatalf("terminal body = %q, err = %v", terminalBody, err)
+	}
+	terminal.Finalize(Usage{}, "", "upstream_forbidden")
+	_ = terminal.Body.Close()
+	if adapter.refreshes.Load() != 1 {
+		t.Fatalf("terminal denial unexpectedly refreshed credential: %d", adapter.refreshes.Load())
+	}
+	terminalCandidates, err := accountRepo.ListRoutingCandidates(ctx, account.ProviderBuild, "grok-terminal", "")
+	if err != nil || len(terminalCandidates) != 1 || terminalCandidates[0].ModelQuotaBlock == nil || terminalCandidates[0].ModelQuotaBlock.Reason != "model_permission_denied" {
+		t.Fatalf("terminal candidates = %#v, err = %v", terminalCandidates, err)
+	}
+	result, err := service.CreateResponse(ctx, Input{
+		RequestID: "req-model-allowed", ClientKey: clientKey, PublicModel: "grok-allowed",
+		Body: []byte(`{"model":"grok-allowed","input":"hello"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Finalize(Usage{}, "", "")
+	_ = result.Body.Close()
+	if string(body) != "ok" {
+		t.Fatalf("allowed model body = %q", body)
+	}
+}
+
+func TestInspectResponseBodyPreservesContentBeyondClassificationPrefix(t *testing.T) {
+	want := terminalPermissionDeniedBody + strings.Repeat("x", diagnosticBodyLimit)
+	prefix, replay, truncated, err := readResponseBody(io.NopCloser(strings.NewReader(want)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(prefix) != diagnosticBodyLimit || string(prefix) != want[:diagnosticBodyLimit] {
+		t.Fatalf("inspection prefix length = %d", len(prefix))
+	}
+	got, err := io.ReadAll(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = replay.Close()
+	if string(got) != want {
+		t.Fatalf("replayed body length = %d, want %d", len(got), len(want))
+	}
+}
+
 func TestWebRateLimitExhaustsOnlyRequestedQuotaMode(t *testing.T) {
 	ctx := context.Background()
 	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "web-rate-limit.db"))
@@ -1400,10 +1518,14 @@ type systemicForbiddenAdapter struct {
 }
 
 type authRescueAdapter struct {
-	attempts  atomic.Int64
-	refreshes atomic.Int64
-	rejectAll atomic.Bool
+	attempts                 atomic.Int64
+	refreshes                atomic.Int64
+	rejectAll                atomic.Bool
+	terminalPermissionDenied atomic.Bool
+	permissionDeniedModel    string
 }
+
+const terminalPermissionDeniedBody = `{"code":"permission-denied","error":"Access to the chat endpoint is denied. Please update the permissions."}`
 
 func (a *authRescueAdapter) Provider() account.Provider { return account.ProviderBuild }
 func (a *authRescueAdapter) Definition() provider.Definition {
@@ -1417,10 +1539,16 @@ func (a *authRescueAdapter) ForwardResponse(_ context.Context, request provider.
 			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unauthorized","message":"access token rejected"}}`)),
 		}, nil
 	}
-	if request.Credential.EncryptedAccessToken == "access-old" {
+	if request.Model == a.permissionDeniedModel || request.Credential.EncryptedAccessToken == "access-old" {
+		header := make(http.Header)
+		body := `{"error":{"code":"permission_denied","message":"Access to the chat endpoint is denied"}}`
+		if a.terminalPermissionDenied.Load() && request.Model == a.permissionDeniedModel {
+			header.Set("X-Should-Retry", "false")
+			body = terminalPermissionDeniedBody
+		}
 		return &provider.Response{
-			StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header),
-			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"permission_denied","message":"Access to the chat endpoint is denied"}}`)),
+			StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: header,
+			Body: io.NopCloser(strings.NewReader(body)),
 		}, nil
 	}
 	return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
