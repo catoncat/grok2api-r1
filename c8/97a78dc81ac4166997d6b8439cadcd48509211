@@ -1,0 +1,134 @@
+backend/internal/infra/provider/web/protocol_test.go
+  s_54653f60ac62a9::t_ee009bca98699a 9,15-16,18,230,288,372-466,654,660-791,877-1000,1007-1009,1020-1034
+  s_a5d025d803995a::t_14c3d9db7ffd57 1035
+backend/internal/application/gateway/service_test.go
+  s_54653f60ac62a9::t_e671c9c3d4b99d 29,231,260-263,287-290,553-712,864-969,1310-1317,1346-1350,1360,1371-1392,1463-1469,1607-1644
+  s_54653f60ac62a9::t_f56e35d4188632 1645
+backend/go.mod
+  s_54653f60ac62a9::t_272c348929cf70 6-9,14,37-50,59,71
+  s_54653f60ac62a9::t_2ef4b7c4734c64 74
+backend/internal/application/gateway/service.go
+  s_54653f60ac62a9::t_272c348929cf70 167,170-185,187,190,197,207-208,451-454,491,597-598,605-626
+backend/internal/application/settings/service.go
+  s_54653f60ac62a9::t_ee009bca98699a 275-276
+backend/internal/transport/http/inference/handler.go
+  s_54653f60ac62a9::t_272c348929cf70 1048,1075,1110,1114-1119
+  s_54653f60ac62a9::t_fd098792190032 1120-1121
+backend/internal/infra/provider/web/chat.go
+  s_54653f60ac62a9::t_272c348929cf70 38-41,163,174-185,187,192-195,198,209,212-216,223,231-235,242,245-247,279-280,284-288,322,368-373,404,468-472,880-883,893-924
+  s_54653f60ac62a9::t_3d7750a30f33c7 925
+backend/internal/infra/provider/provider.go
+  s_54653f60ac62a9::t_272c348929cf70 22
+README.md
+  s_54653f60ac62a9::t_7d142b69cfccee 154-176,196,198-207
+backend/NOTICE
+  s_54653f60ac62a9::t_cf63f19d6dd03e 1-24
+backend/go.sum
+  s_54653f60ac62a9::t_1c0057b50f11fa 3-4,11-46,79-82,115-116,126-127
+backend/internal/app/application.go
+  s_54653f60ac62a9::t_292cafa94fe46e 112-135,178-181,197-213
+backend/internal/app/startup.go
+  s_54653f60ac62a9::t_d22b669585ae75 324,334
+backend/internal/application/account/service.go
+  s_54653f60ac62a9::t_e736ce892acf80 868,1641-1650
+backend/internal/application/account/web_console_sync_test.go
+  s_54653f60ac62a9::t_5c32afd71c335b 46,91
+backend/internal/application/gateway/image.go
+  s_54653f60ac62a9::t_5ff5c8cd6e2158 5,188-189,194,198-203
+backend/internal/application/gateway/video.go
+  s_54653f60ac62a9::t_4b1209691705c6 287-289
+backend/internal/application/media/service.go
+  s_54653f60ac62a9::t_49c07395d33c1f 35,48-52,135-138,140-147,151-156
+backend/internal/infra/config/config.go
+  s_54653f60ac62a9::t_f8f2a1363d1d63 169,176-185,362-368,370-376,521
+backend/internal/infra/egress/manager.go
+  s_54653f60ac62a9::t_90b0560170179c 4,10,25-28,63,103-104,117-118,122,130,221-225,227-235,238-241,245-246,251-276,340-341,347-348,355,363-373,386,389,395-409
+backend/internal/infra/egress/manager_test.go
+  s_54653f60ac62a9::t_ab255f51926465 6,8-9,20-170,359,372-373,378-420,447-465
+backend/internal/infra/egress/tlsclient.go
+  s_54653f60ac62a9::t_41934760da9ecf 55,58,73
+backend/internal/infra/egress/tlsclient_test.go
+  s_54653f60ac62a9::t_6f3126f044836c 56,74,88,105-124
+backend/internal/infra/media/s3_store.go
+  s_54653f60ac62a9::t_3a838dd79d9820 1-154
+backend/internal/infra/persistence/relational/account_repository.go
+  s_54653f60ac62a9::t_69c7a9663f5818 781-797,942-1009
+backend/internal/infra/persistence/relational/console_provider_test.go
+  s_54653f60ac62a9::t_1067bd88a09eef 70-152
+backend/internal/infra/persistence/relational/postgres_integration_test.go
+  s_54653f60ac62a9::t_071b00de0286d8 28,38-52
+backend/internal/infra/provider/console/adapter.go
+  s_54653f60ac62a9::t_5e756f33566812 57,82-87,90-91,94-101
+backend/internal/infra/provider/console/catalog.go
+  s_54653f60ac62a9::t_a964c00ec51449 10,18,27-29,83-121
+backend/internal/infra/provider/console/console_test.go
+  s_54653f60ac62a9::t_f8af1a3dc03cf9 71-118,161-188,197,201
+backend/internal/infra/provider/console/import.go
+  s_54653f60ac62a9::t_4c4df57a83add5 25,65-68,73-75,117
+backend/internal/infra/provider/console/normalize.go
+  s_54653f60ac62a9::t_84001acb585766 108,123-124,129-157
+backend/internal/infra/provider/web/adapter.go
+  s_54653f60ac62a9::t_d47bd83f8c174f 6,31-39,44
+backend/internal/infra/provider/web/attachments.go
+  s_54653f60ac62a9::t_8a73cd1b4c52ff 77
+backend/internal/infra/provider/web/headers.go
+  s_54653f60ac62a9::t_9118fa56a31060 12-20
+backend/internal/infra/provider/web/image.go
+  s_54653f60ac62a9::t_c1b01668e1b945 28-31,34-37,306,313-321,323,355-362,365,380-381,384,387-390,394,407-409,412-416,600-603,669,693,891,893,944,947,956-960,966-978,980,1014-1023,1028,1051-1053,1057,1063-1066,1068,1114-1119,1167-1173,1181-1219,1225,1230-1242,1249,1263-1301,1313
+backend/internal/infra/provider/web/quota.go
+  s_54653f60ac62a9::t_74e1b87e60e734 151-154,165-170,172,243-245
+backend/internal/infra/provider/web/quota_test.go
+  s_54653f60ac62a9::t_a79b711d2b607c 12,18,26-79,139,167,286
+backend/internal/infra/provider/web/security_test.go
+  s_54653f60ac62a9::t_1aa834df8da6b4 57-106
+backend/internal/infra/provider/web/statsig.go
+  s_54653f60ac62a9::t_cb790596862160 8,20,29-32,35-40,48-54,56,59-62,65-66,74-79,81-83,86-88,99-103,107-114,116,118-121,123-126,128-138,141-143,145,148-151,153,157,160-187,189-190,192-193,196-200,202-210,212-215,221-223,227,232,234,237,240-293,296,299-301,307,318,321-369,372,378,521,523,530,532,535,537,539-550,552,555,558-566,587,590,593-600
+backend/internal/infra/provider/web/statsig_discovery_test.go
+  s_54653f60ac62a9::t_43f774818b39ce 1-206
+backend/internal/infra/provider/web/statsig_engine.go
+  s_54653f60ac62a9::t_c83245db5c250b 1-749
+backend/internal/infra/provider/web/statsig_engine_parse_test.go
+  s_54653f60ac62a9::t_51e7966a3a0c89 1-53
+backend/internal/infra/provider/web/statsig_local_test.go
+  s_54653f60ac62a9::t_01bcde9bd04246 1-229
+backend/internal/infra/provider/web/statsig_shim.js
+  s_54653f60ac62a9::t_fa3623dc4dadd8 1-216
+backend/internal/infra/provider/web/statsig_test.go
+  s_54653f60ac62a9::t_500d56916bc463 11,13-14,19,26-31,42-114,191-192,212-213,216,220,224-225,227,231-232,235-236,240-241,244-246,249-250,280,284,287,290-557,567-569,576,578-591,595,598-620,631,635-637
+backend/internal/infra/provider/web/video.go
+  s_54653f60ac62a9::t_2c903bf37d77f9 91
+backend/internal/repository/account.go
+  s_54653f60ac62a9::t_334e724654c0be 56
+backend/internal/transport/http/inference/handler_test.go
+  s_54653f60ac62a9::t_c0949d0be6adcb 106-122,451-472
+frontend/src/features/accounts/account-quota.tsx
+  s_54653f60ac62a9::t_59b56ab1ba71c1 109-116,119-145,195,203
+frontend/src/features/accounts/accounts-page.tsx
+  s_54653f60ac62a9::t_5c2d0c41fc1e16 926-934
+frontend/src/shared/i18n/index.ts
+  s_54653f60ac62a9::t_0257bcdb3c2f95 412,955
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c897a78dc81ac4166997d6b8439cadcd48509211",
+  "prompts": {},
+  "sessions": {
+    "s_54653f60ac62a9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a96-6b17-7360-ae10-e0d870c833f3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a5d025d803995a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5266-513f-77c0-85db-54d2f1007ce8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
