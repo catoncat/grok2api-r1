@@ -23,7 +23,7 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 	}{
 		{
 			name: "top-level permanent chat denial", body: `{"status_code":403,"error":"Access to the chat endpoint is denied. Please update the permissions."}`,
-			accountScoped: true, permanentAccountDenial: true,
+			accountScoped: true, permanentAccountDenial: true, modelPermissionDenied: true,
 		},
 		{
 			name: "model permission denial", body: `{"error":{"code":"permission_denied","message":"Access to the chat endpoint is denied"}}`,
@@ -35,6 +35,14 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 		},
 		{
 			name: "unknown policy rejection", body: `{"error":"upstream policy rejected request"}`,
+		},
+		{
+			name: "other code cannot claim model permission", body: `{"error":{"code":"account_suspended","message":"Access to the chat endpoint is denied"}}`,
+			accountScoped: true, permanentAccountDenial: true, upstreamCode: "account_suspended",
+		},
+		{
+			name: "generic access denied is not model permission", body: `{"error":"access denied"}`,
+			accountScoped: true, permanentAccountDenial: true,
 		},
 		{
 			name: "free model quota", body: `{"error":"You've used all the included free usage for model grok-build"}`,

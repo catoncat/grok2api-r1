@@ -86,7 +86,7 @@ func newHTTPUpstreamFailure(status int, body []byte, accountID uint64, accountNa
 		failure.Code = "upstream_forbidden"
 		failure.PublicMessage = "上游拒绝了该请求"
 		failure.PermanentAccountDenial = isPermanentAccountDenial(metadataText)
-		failure.ModelPermissionDenied = failure.PermanentAccountDenial && strings.EqualFold(upstreamCode, "permission_denied")
+		failure.ModelPermissionDenied = isModelPermissionDenial(upstreamCode, metadataText)
 		failure.ModelQuotaExhausted = isModelQuotaExhaustion(metadataText)
 		failure.FreeQuotaExhausted = failure.ModelQuotaExhausted || isFreeQuotaExhaustion(metadataText)
 		failure.QuotaExhausted = failure.FreeQuotaExhausted || isPaidQuotaExhaustion(metadataText)
@@ -160,6 +160,13 @@ func isPermanentAccountDenial(text string) bool {
 		return true
 	}
 	return strings.Trim(strings.TrimSpace(text), " .!\t\r\n") == "access denied"
+}
+
+func isModelPermissionDenial(upstreamCode, text string) bool {
+	if !strings.Contains(text, "access to the chat endpoint is denied") {
+		return false
+	}
+	return upstreamCode == "" || strings.EqualFold(upstreamCode, "permission_denied")
 }
 
 func isPaidQuotaExhaustion(text string) bool {
