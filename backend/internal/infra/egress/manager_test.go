@@ -517,6 +517,27 @@ func TestBuildForbiddenDoesNotPoisonEgressNode(t *testing.T) {
 	}
 }
 
+func TestBuildOAuthPending400DoesNotCoolEgressNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "build", Scope: domain.ScopeBuild, Enabled: true, Health: 1}}
+	manager := NewManager(repository, cipher)
+	lease, _, err := manager.AcquireIfConfigured(context.Background(), domain.ScopeBuild, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.Release()
+	manager.FeedbackForScope(context.Background(), domain.ScopeBuild, 1, http.StatusBadRequest, nil)
+	if repository.updates != 0 || repository.node.Health != 1 || repository.node.LastError != "" || repository.node.CooldownUntil != nil {
+		t.Fatalf("build OAuth pending 400 changed node: updates=%d node=%#v", repository.updates, repository.node)
+	}
+	if !managerHasClientForNode(manager, 1) {
+		t.Fatal("build client was invalidated by OAuth pending 400")
+	}
+}
+
 func TestWebForbiddenRequiresConfirmationBeforePoisoningNode(t *testing.T) {
 	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	if err != nil {

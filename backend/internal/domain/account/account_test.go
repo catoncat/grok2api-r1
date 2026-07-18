@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+func TestBillingPlanSignalsIgnoreUsagePercentAlone(t *testing.T) {
+	if (Billing{CreditUsagePercent: 42.5}).IsPaid() {
+		t.Fatal("usage percent alone must not classify billing as paid")
+	}
+	if !(Billing{PlanName: "SuperGrok", UsagePeriodType: "USAGE_PERIOD_TYPE_WEEKLY"}).IsPaid() {
+		t.Fatal("SuperGrok plan should classify as paid even at zero usage")
+	}
+	if !(Billing{PlanCode: "free-tier"}).HasFreeProfileSignal() {
+		t.Fatal("free-tier plan should classify as a free profile")
+	}
+	if (Billing{CreditUsagePercent: 42.5, IsUnifiedBillingUser: true, UsagePeriodType: "USAGE_PERIOD_TYPE_WEEKLY"}).HasFreeProfileSignal() {
+		t.Fatal("generic billing fields must not classify a profile as free")
+	}
+}
+
 func TestBillingIsExhaustedForOnDemandCredits(t *testing.T) {
 	if !(Billing{OnDemandCap: 50, CreditUsagePercent: 100}).IsExhausted(0) {
 		t.Fatal("expected exhausted on-demand billing")
