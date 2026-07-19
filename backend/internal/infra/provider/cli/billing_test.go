@@ -4,6 +4,40 @@ import (
 	"testing"
 )
 
+func TestParseSubscriptionTier(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "top level", body: `{"subscriptionTier":"SuperGrokPro"}`, want: "SuperGrokPro"},
+		{name: "nested user", body: `{"user":{"subscription_tier":"x_premium"}}`, want: "x_premium"},
+		{name: "missing", body: `{}`, want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseSubscriptionTier([]byte(test.body))
+			if err != nil || got != test.want {
+				t.Fatalf("tier = %q, err = %v", got, err)
+			}
+		})
+	}
+}
+
+func TestSubscriptionTierFromJWT(t *testing.T) {
+	for _, test := range []struct {
+		token string
+		want  string
+	}{
+		{token: "e30.eyJ0aWVyIjoyfQ.signature", want: "x_basic"},
+		{token: "e30.eyJ0aWVyIjoiU3VwZXJHcm9rUHJvIn0.signature", want: "SuperGrokPro"},
+		{token: "not-a-jwt", want: ""},
+	} {
+		if got := subscriptionTierFromJWT(test.token); got != test.want {
+			t.Fatalf("subscriptionTierFromJWT() = %q, want %q", got, test.want)
+		}
+	}
+}
+
 func TestParseBillingMonthlyPayload(t *testing.T) {
 	value, err := parseBilling([]byte(`{"config":{"monthlyLimit":{"val":100},"used":{"val":25},"onDemandCap":{"val":0},"billingPeriodStart":"2026-07-01T00:00:00Z","billingPeriodEnd":"2026-08-01T00:00:00Z"}}`))
 	if err != nil {

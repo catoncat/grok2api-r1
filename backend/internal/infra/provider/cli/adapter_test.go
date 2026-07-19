@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -179,7 +180,7 @@ func TestModelCatalogETagSignalsMissingOrChangedCatalogBaseline(t *testing.T) {
 	}
 }
 
-func TestGetBillingUsesCreditsEndpointOnce(t *testing.T) {
+func TestGetBillingUsesCreditsAndLiveSubscriptionTier(t *testing.T) {
 	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil {
 		t.Fatal(err)
@@ -192,17 +193,76 @@ func TestGetBillingUsesCreditsEndpointOnce(t *testing.T) {
 	calls := 0
 	adapter.http.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls++
-		if request.URL.Path != "/v1/billing" || request.URL.Query().Get("format") != "credits" {
-			t.Fatalf("billing request = %s", request.URL.String())
+		if request.Header.Get("x-grok-client-version") != "0.2.101" || request.Header.Get("User-Agent") != "grok-shell/0.2.101 (linux; x86_64)" {
+			t.Fatalf("headers = %#v", request.Header)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"config":{"creditUsagePercent":25,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-07-01T00:00:00Z","end":"2026-07-08T00:00:00Z"}}}`)), Request: request}, nil
+		var body string
+		switch request.URL.Path {
+		case "/v1/billing":
+			if request.URL.Query().Get("format") != "credits" {
+				t.Fatalf("billing request = %s", request.URL.String())
+			}
+			body = `{"config":{"creditUsagePercent":0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-07-01T00:00:00Z","end":"2026-07-08T00:00:00Z"}}}`
+		case "/v1/user":
+			if request.URL.Query().Get("include") != "subscription" {
+				t.Fatalf("subscription request = %s", request.URL.String())
+			}
+			body = `{"subscriptionTier":"SuperGrokPro"}`
+		default:
+			t.Fatalf("unexpected request = %s", request.URL.String())
+		}
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 	})
 	billing, err := adapter.GetBilling(context.Background(), account.Credential{ID: 7, EncryptedAccessToken: encrypted})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 || billing.AccountID != 7 || billing.CreditUsagePercent != 25 || billing.UsagePeriodType != "USAGE_PERIOD_TYPE_WEEKLY" || billing.SyncedAt.IsZero() {
+	if calls != 2 || billing.AccountID != 7 || billing.PlanName != "SuperGrokPro" || !billing.IsPaid() || billing.CreditUsagePercent != 0 || billing.UsagePeriodType != "USAGE_PERIOD_TYPE_WEEKLY" || billing.SyncedAt.IsZero() {
 		t.Fatalf("calls=%d billing=%#v", calls, billing)
+	}
+}
+
+func TestGetBillingKeepsSnapshotWhenSubscriptionLookupFails(t *testing.T) {
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwt := "e30.eyJ0aWVyIjoic3VwZXJncm9rIn0.signature"
+	encrypted, err := cipher.Encrypt(jwt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		status int
+		body   string
+		err    error
+	}{
+		{name: "empty tier", status: http.StatusOK, body: `{}`},
+		{name: "non 200", status: http.StatusServiceUnavailable, body: `{"error":"unavailable"}`},
+		{name: "network", err: errors.New("subscription unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := NewAdapter(Config{BaseURL: "https://cli-chat-proxy.grok.com/v1", ClientVersion: "0.2.101"}, cipher)
+			calls := 0
+			adapter.http.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				calls++
+				if request.URL.Path == "/v1/user" {
+					if test.err != nil {
+						return nil, test.err
+					}
+					return &http.Response{StatusCode: test.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(test.body)), Request: request}, nil
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"config":{"creditUsagePercent":25,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY"}}}`)), Request: request}, nil
+			})
+			billing, err := adapter.GetBilling(context.Background(), account.Credential{ID: 8, EncryptedAccessToken: encrypted})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 2 || billing.PlanName != "supergrok" || billing.CreditUsagePercent != 25 {
+				t.Fatalf("calls=%d billing=%#v", calls, billing)
+			}
+		})
 	}
 }
 
