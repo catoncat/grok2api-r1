@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	startupRecoveryBudget    = 20 * time.Second
-	startupCriticalWindow    = 2 * time.Minute
-	startupCriticalLimit     = 100
-	statsigWarmupInterval    = 15 * time.Minute
-	modelCatalogStaleAfter   = 24 * time.Hour
-	modelCatalogCatchupEvery = 6 * time.Hour
+	startupRecoveryBudget     = 20 * time.Second
+	startupCriticalWindow     = 2 * time.Minute
+	startupCriticalLimit      = 100
+	statsigWarmupInterval     = 15 * time.Minute
+	statsigWarmupAccountLimit = 3
+	modelCatalogStaleAfter    = 24 * time.Hour
+	modelCatalogCatchupEvery  = 6 * time.Hour
 )
 
 type startupReport struct {
@@ -303,7 +304,7 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 		} else if err == nil {
 			warmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			var warmed int
-			warmed, err = a.web.WarmStatsig(warmCtx, values[0])
+			warmed, err = warmStatsigFromAccounts(warmCtx, values, a.web.WarmStatsig)
 			cancel()
 			if err == nil {
 				a.startup.setStatsig("warm", "Statsig meta 已预热", warmed)
@@ -315,6 +316,22 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 		}
 		resetTimer(timer, statsigWarmupInterval)
 	}
+}
+
+func warmStatsigFromAccounts(ctx context.Context, values []accountdomain.Credential, warm func(context.Context, accountdomain.Credential) (int, error)) (int, error) {
+	limit := min(len(values), statsigWarmupAccountLimit)
+	var lastErr error
+	for index := range limit {
+		warmed, err := warm(ctx, values[index])
+		if err == nil {
+			return warmed, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+	}
+	return 0, lastErr
 }
 
 func (a *Application) runModelCatalogCatchup(ctx context.Context) {
