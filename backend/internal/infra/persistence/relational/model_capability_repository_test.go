@@ -297,6 +297,64 @@ func TestManualModelRouteBindingsAndRediscovery(t *testing.T) {
 	}
 }
 
+func TestAddModelRouteAccountIsAppendOnlyAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDatabase(t)
+	models := NewModelRepository(database)
+	accounts := NewAccountRepository(database)
+	createAccount := func(providerValue account.Provider, source string) account.Credential {
+		value, _, err := accounts.UpsertByIdentity(ctx, account.Credential{
+			Provider: providerValue, Name: source, SourceKey: source,
+			EncryptedAccessToken: testEncryptedToken, Enabled: true, AuthStatus: account.AuthStatusActive,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	first := createAccount(account.ProviderBuild, "first")
+	second := createAccount(account.ProviderBuild, "second")
+	third := createAccount(account.ProviderBuild, "third")
+	consoleAccount := createAccount(account.ProviderConsole, "console")
+	route, err := models.Create(ctx, model.Route{
+		PublicID: "verified-build", Provider: account.ProviderBuild, UpstreamModel: "grok-4.5",
+		Capability: model.CapabilityResponses, Enabled: true,
+	}, []uint64{first.ID, second.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		if err := models.AddAccountBinding(ctx, account.ProviderBuild, "grok-4.5", third.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updated, err := models.Get(ctx, route.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []uint64{first.ID, second.ID, third.ID}
+	if len(updated.BoundAccountIDs) != len(want) {
+		t.Fatalf("bindings = %#v", updated.BoundAccountIDs)
+	}
+	for index := range want {
+		if updated.BoundAccountIDs[index] != want[index] {
+			t.Fatalf("bindings = %#v, want %#v", updated.BoundAccountIDs, want)
+		}
+	}
+
+	if err := models.AddAccountBinding(ctx, account.ProviderBuild, "grok-4.5", consoleAccount.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("provider mismatch err = %v", err)
+	}
+	if err := models.AddAccountBinding(ctx, account.ProviderBuild, "missing", third.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("missing route err = %v", err)
+	}
+	unchanged, err := models.Get(ctx, route.ID)
+	if err != nil || len(unchanged.BoundAccountIDs) != len(want) {
+		t.Fatalf("unchanged bindings = %#v, err = %v", unchanged.BoundAccountIDs, err)
+	}
+}
+
 func TestManualWebRouteSurvivesCatalogReconciliation(t *testing.T) {
 	ctx := context.Background()
 	database := openTestDatabase(t)

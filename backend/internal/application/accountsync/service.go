@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	defaultWorkerCount = 25
-	operationTimeout   = 2 * time.Minute
+	defaultWorkerCount            = 25
+	operationTimeout              = 2 * time.Minute
+	buildModelVerificationTimeout = 30 * time.Second
+	verifiedBuildModel            = "grok-4.5"
 )
 
 type billingSynchronizer interface {
@@ -30,6 +32,10 @@ type billingSynchronizer interface {
 type modelSynchronizer interface {
 	HasSuccessfulAccountSync(ctx context.Context, accountID uint64) (bool, error)
 	SyncAccount(ctx context.Context, accountID uint64) (int, error)
+}
+
+type buildModelVerifier interface {
+	VerifyBuildModel(ctx context.Context, accountID uint64, upstreamModel string) error
 }
 
 type accountReader interface {
@@ -47,14 +53,15 @@ type quotaSynchronizer interface {
 
 // Service 对新接入账号执行一次性额度与模型补齐，并限制批量同步并发。
 type Service struct {
-	logger   *slog.Logger
-	accounts accountReader
-	billing  billingSynchronizer
-	quota    quotaSynchronizer
-	models   modelSynchronizer
-	syncs    singleflight.Group
-	workers  atomic.Int64
-	bulkPool *batch.Pool
+	logger             *slog.Logger
+	accounts           accountReader
+	billing            billingSynchronizer
+	quota              quotaSynchronizer
+	models             modelSynchronizer
+	buildModelVerifier buildModelVerifier
+	syncs              singleflight.Group
+	workers            atomic.Int64
+	bulkPool           *batch.Pool
 }
 
 func NewService(logger *slog.Logger, accounts accountReader, billing billingSynchronizer, quota quotaSynchronizer, models modelSynchronizer) *Service {
@@ -67,6 +74,10 @@ func (s *Service) SetBulkPool(pool *batch.Pool) {
 	if pool != nil {
 		s.bulkPool = pool
 	}
+}
+
+func (s *Service) SetBuildModelVerifier(verifier buildModelVerifier) {
+	s.buildModelVerifier = verifier
 }
 
 func (s *Service) UpdateConcurrency(value int) {
@@ -218,15 +229,25 @@ func (s *Service) syncAccount(ctx context.Context, accountID uint64) error {
 		s.logger.Warn("account_initial_model_check_failed", "account_id", accountID, "error", err)
 		return errors.Join(syncErr, fmt.Errorf("检查模型快照: %w", err))
 	}
-	if hasModels {
-		return syncErr
+	modelsReady := hasModels
+	if !hasModels {
+		operationCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+		_, err = s.models.SyncAccount(operationCtx, accountID)
+		cancel()
+		if err != nil {
+			s.logger.Warn("account_initial_model_sync_failed", "account_id", accountID, "error", err)
+			syncErr = errors.Join(syncErr, fmt.Errorf("同步模型: %w", err))
+		} else {
+			modelsReady = true
+		}
 	}
-	operationCtx, cancel := context.WithTimeout(ctx, operationTimeout)
-	_, err = s.models.SyncAccount(operationCtx, accountID)
-	cancel()
-	if err != nil {
-		s.logger.Warn("account_initial_model_sync_failed", "account_id", accountID, "error", err)
-		syncErr = errors.Join(syncErr, fmt.Errorf("同步模型: %w", err))
+	if modelsReady && view.Credential.Provider == accountdomain.ProviderBuild && s.buildModelVerifier != nil {
+		verificationCtx, cancel := context.WithTimeout(ctx, buildModelVerificationTimeout)
+		verificationErr := s.buildModelVerifier.VerifyBuildModel(verificationCtx, accountID, verifiedBuildModel)
+		cancel()
+		if verificationErr != nil {
+			s.logger.Warn("build_model_verification_failed", "account_id", accountID, "model", verifiedBuildModel, "error", verificationErr)
+		}
 	}
 	return syncErr
 }
