@@ -1,0 +1,29 @@
+backend/internal/infra/provider/cli/billing_test.go
+  s_e586d45d714a4a::t_344a08fe3dbf52 7-40
+backend/internal/infra/provider/cli/adapter.go
+  s_e586d45d714a4a::t_410ffa3b88cb96 37-38,340-344,520-546
+  s_e586d45d714a4a::t_4b44880a29836c 547-548
+backend/internal/infra/provider/cli/billing.go
+  s_e586d45d714a4a::t_f288bff1631fd2 7,12-66
+  s_e586d45d714a4a::t_5ce363c0cdaf17 67
+backend/internal/infra/provider/cli/adapter_test.go
+  s_e586d45d714a4a::t_3c678a8c84cdfa 238,241-242,254
+  s_e586d45d714a4a::t_353c5c4c2e6100 9,183,196-197,199-214,220,225-237,239-240,243-253,255-266
+  s_e586d45d714a4a::t_d4cafb158c33b6 267-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "447d256f554e4d05a218fc3a012b8c79216a4eda",
+  "prompts": {},
+  "sessions": {
+    "s_e586d45d714a4a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f769f-32ea-7ee0-919c-c10eea13b601",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
