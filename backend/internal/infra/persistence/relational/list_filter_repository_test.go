@@ -24,8 +24,10 @@ func TestListFilters(t *testing.T) {
 
 	free := accountModel{IdentityKey: testIdentityKey("free"), Provider: "grok_build", Name: "free", SourceKey: "free", ObservedModel: "grok-build-free", Enabled: true, AuthStatus: "active", Priority: 1}
 	paid := accountModel{IdentityKey: testIdentityKey("paid"), Provider: "grok_build", Name: "paid", SourceKey: "paid", Enabled: true, AuthStatus: "active", Priority: 1}
+	paidZeroUsage := accountModel{IdentityKey: testIdentityKey("paid-zero"), Provider: "grok_build", Name: "paid-zero", SourceKey: "paid-zero", Enabled: true, AuthStatus: "active", Priority: 1}
+	ambiguousUsage := accountModel{IdentityKey: testIdentityKey("ambiguous-usage"), Provider: "grok_build", Name: "ambiguous-usage", SourceKey: "ambiguous-usage", Enabled: true, AuthStatus: "active", Priority: 1}
 	disabled := accountModel{IdentityKey: testIdentityKey("disabled-filter"), Provider: "grok_build", Name: "disabled", SourceKey: "disabled-filter", Enabled: false, AuthStatus: "active", Priority: 1}
-	for _, value := range []*accountModel{&free, &paid, &disabled} {
+	for _, value := range []*accountModel{&free, &paid, &paidZeroUsage, &ambiguousUsage, &disabled} {
 		if err := database.db.WithContext(ctx).Create(value).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -33,6 +35,8 @@ func TestListFilters(t *testing.T) {
 	credentials := []accountCredentialModel{
 		{AccountID: free.ID, AuthType: "oauth", EncryptedRefresh: "refresh", UpdatedAt: now},
 		{AccountID: paid.ID, AuthType: "oauth", EncryptedPrimary: testEncryptedToken, UpdatedAt: now},
+		{AccountID: paidZeroUsage.ID, AuthType: "oauth", EncryptedPrimary: testEncryptedToken, UpdatedAt: now},
+		{AccountID: ambiguousUsage.ID, AuthType: "oauth", EncryptedPrimary: testEncryptedToken, UpdatedAt: now},
 		{AccountID: disabled.ID, AuthType: "oauth", EncryptedPrimary: testEncryptedToken, UpdatedAt: now},
 	}
 	for index := range credentials {
@@ -43,12 +47,18 @@ func TestListFilters(t *testing.T) {
 	if err := database.db.WithContext(ctx).Create(&billingModel{AccountID: paid.ID, MonthlyLimit: 100, Used: 10, SyncedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := database.db.WithContext(ctx).Create(&billingModel{AccountID: paidZeroUsage.ID, PlanName: "SuperGrok", IsUnifiedBillingUser: true, UsagePeriodType: "USAGE_PERIOD_TYPE_WEEKLY", SyncedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.db.WithContext(ctx).Create(&billingModel{AccountID: ambiguousUsage.ID, IsUnifiedBillingUser: true, UsagePeriodType: "USAGE_PERIOD_TYPE_WEEKLY", CreditUsagePercent: 42.5, SyncedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	accounts := NewAccountRepository(database)
 	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{QuotaType: "free", Now: now}, 1)
-	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{QuotaType: "paid", Now: now}, 1)
-	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{QuotaType: "unknown", Now: now}, 1)
-	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{Status: "active", Now: now}, 2)
+	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{QuotaType: "paid", Now: now}, 2)
+	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{QuotaType: "unknown", Now: now}, 2)
+	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{Status: "active", Now: now}, 4)
 	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{Status: "disabled", Now: now}, 1)
 	refreshable := true
 	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{Refreshable: &refreshable, Now: now}, 1)
@@ -63,7 +73,7 @@ func TestListFilters(t *testing.T) {
 		assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{Provider: "grok_web", QuotaType: tier, Now: now}, 1)
 	}
 	accountValues, _, err := accounts.List(ctx, repository.AccountListQuery{Page: repository.PageQuery{Limit: 20, Sort: repository.SortQuery{Field: "name", Direction: repository.SortAscending}}, Filter: repository.AccountListFilter{Provider: "grok_build", Now: now}})
-	if err != nil || len(accountValues) != 3 || accountValues[0].Name != "disabled" || accountValues[2].Name != "paid" {
+	if err != nil || len(accountValues) != 5 || accountValues[0].Name != "ambiguous-usage" || accountValues[1].Name != "disabled" || accountValues[3].Name != "paid" || accountValues[4].Name != "paid-zero" {
 		t.Fatalf("account name sort = %#v, err = %v", accountValues, err)
 	}
 

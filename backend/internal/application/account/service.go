@@ -468,8 +468,12 @@ func newQuotaView(billing *accountdomain.Billing, observedTokens int64, recovery
 			ExhaustedAt: recovery.ExhaustedAt, NextProbeAt: recovery.NextProbeAt, LastConfirmedAt: recovery.LastConfirmedAt,
 		}
 	}
-	if billing != nil && (billing.MonthlyLimit > 0 || billing.OnDemandCap > 0 || billing.OnDemandUsed > 0 || billing.PrepaidBalance > 0 || billing.CreditUsagePercent > 0) {
-		result := QuotaView{Type: QuotaTypePaid, Source: "upstreamBilling", Confidence: "observed", Unit: "credits", UsagePercent: billing.CreditUsagePercent, Status: QuotaStatusActive, PeriodStart: billing.BillingPeriodStart, PeriodEnd: billing.BillingPeriodEnd}
+	if billing != nil && billing.IsPaid() {
+		periodStart, periodEnd := billing.BillingPeriodStart, billing.BillingPeriodEnd
+		if billing.UsagePeriodType != "" {
+			periodStart, periodEnd = billing.UsagePeriodStart, billing.UsagePeriodEnd
+		}
+		result := QuotaView{Type: QuotaTypePaid, Source: "upstreamBilling", Confidence: "observed", Unit: "credits", UsagePercent: billing.CreditUsagePercent, Status: QuotaStatusActive, PeriodStart: periodStart, PeriodEnd: periodEnd}
 		if recovery != nil && recovery.Kind == accountdomain.QuotaRecoveryKindPaid {
 			result.Status = QuotaStatusWaitingReset
 			if recovery.Status == accountdomain.QuotaRecoveryStatusProbing {
@@ -499,6 +503,12 @@ func newQuotaView(billing *accountdomain.Billing, observedTokens int64, recovery
 			}
 		case billing.PrepaidBalance > 0:
 			result.Remaining = billing.PrepaidBalance
+		case billing.UsagePeriodType != "":
+			result.Unit = "percent"
+			result.Used = billing.CreditUsagePercent
+			result.Limit = 100
+			result.Remaining = max(0, 100-billing.CreditUsagePercent)
+			result.LimitKnown = true
 		}
 		return result
 	}
@@ -541,7 +551,7 @@ func isEstimatedFreeBillingProfile(billing *accountdomain.Billing) bool {
 	if billing == nil {
 		return false
 	}
-	return billing.IsUnifiedBillingUser || billing.UsagePeriodType != "" || billing.TopUpMethod != "" || billing.BillingPeriodStart != "" || len(billing.History) > 0
+	return billing.HasFreeProfileSignal()
 }
 
 // StartDeviceLogin 启动短期 Device OAuth，会话只保存在有界运行态存储中。
@@ -1629,7 +1639,7 @@ func (s *Service) ProbePaidQuota(ctx context.Context, value accountdomain.Creden
 }
 
 func (s *Service) reconcilePaidQuotaRecovery(ctx context.Context, credential accountdomain.Credential, billing accountdomain.Billing, afterProbe bool) error {
-	isPaid := billing.MonthlyLimit > 0 || billing.OnDemandCap > 0 || billing.OnDemandUsed > 0 || billing.PrepaidBalance > 0 || billing.CreditUsagePercent > 0
+	isPaid := billing.IsPaid()
 	if !isPaid || !billing.IsExhausted(credential.MinimumRemaining) {
 		recovery, err := s.accounts.GetQuotaRecovery(ctx, credential.ID)
 		if errors.Is(err, repository.ErrNotFound) || (err == nil && recovery.Kind != accountdomain.QuotaRecoveryKindPaid) {

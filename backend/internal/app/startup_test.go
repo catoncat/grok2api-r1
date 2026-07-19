@@ -28,6 +28,33 @@ func TestReadinessStartupReportDoesNotExposeInternalErrors(t *testing.T) {
 	}
 }
 
+func TestWarmStatsigFromAccountsUsesBoundedFallback(t *testing.T) {
+	values := []accountdomain.Credential{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}}
+	calls := make([]uint64, 0, statsigWarmupAccountLimit)
+	warmed, err := warmStatsigFromAccounts(context.Background(), values, func(_ context.Context, value accountdomain.Credential) (int, error) {
+		calls = append(calls, value.ID)
+		if value.ID < 3 {
+			return 0, errors.New("warmup failed")
+		}
+		return 7, nil
+	})
+	if err != nil || warmed != 7 || len(calls) != 3 || calls[0] != 1 || calls[2] != 3 {
+		t.Fatalf("warmed=%d calls=%v err=%v", warmed, calls, err)
+	}
+}
+
+func TestWarmStatsigFromAccountsStopsAtLimit(t *testing.T) {
+	values := []accountdomain.Credential{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}}
+	calls := 0
+	_, err := warmStatsigFromAccounts(context.Background(), values, func(context.Context, accountdomain.Credential) (int, error) {
+		calls++
+		return 0, errors.New("warmup failed")
+	})
+	if err == nil || calls != statsigWarmupAccountLimit {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+}
+
 func TestReadinessKeepsBuildReadyWhenWebIsUnavailable(t *testing.T) {
 	ctx := context.Background()
 	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "readiness.db"))
