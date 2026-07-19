@@ -2157,6 +2157,31 @@ func (s *Service) refreshTokens(ctx context.Context, ids []uint64, progress Batc
 	})
 }
 
+// BatchRefreshTokens 续期选中的 Build 凭据；停用、失效或缺少 refresh token 的账号会被跳过。
+func (s *Service) BatchRefreshTokens(ctx context.Context, ids []uint64) (int, int, int, error) {
+	values, err := normalizeBatchIDs(ids)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if s.providers == nil {
+		return 0, 0, 0, fmt.Errorf("Provider 注册表未初始化")
+	}
+	refreshableIDs := make([]uint64, 0, len(values))
+	for _, id := range values {
+		value, getErr := s.accounts.Get(ctx, id)
+		if getErr != nil {
+			return 0, 0, 0, mapRepositoryError(getErr)
+		}
+		if value.Provider != accountdomain.ProviderBuild || !s.providers.SupportsCredentialRefresh(value.Provider) || !value.Enabled || value.AuthStatus != accountdomain.AuthStatusActive || value.EncryptedRefreshToken == "" {
+			continue
+		}
+		refreshableIDs = append(refreshableIDs, id)
+	}
+	skipped := len(values) - len(refreshableIDs)
+	succeeded, failed, err := s.refreshTokens(ctx, refreshableIDs, nil)
+	return succeeded, failed, skipped, err
+}
+
 // BatchRefreshBilling 使用有限并发刷新选中账号，避免大量账号同步时串行阻塞或无界创建 goroutine。
 func (s *Service) BatchRefreshBilling(ctx context.Context, ids []uint64) (int, int, error) {
 	values, err := normalizeBatchIDs(ids)

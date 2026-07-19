@@ -106,6 +106,20 @@ func TestConvertWebToBuildRejectsInvalidStrategy(t *testing.T) {
 	}
 }
 
+func TestBatchRefreshTokensRejectsNonBuildProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/api/admin/v1/accounts/batch/refresh-tokens", strings.NewReader(`{"ids":["1"],"provider":"grok_web"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	new(Handler).batchRefreshTokens(ctx)
+
+	if recorder.Code != 400 || !strings.Contains(recorder.Body.String(), `"code":"invalidProvider"`) {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestAccountProgressEventIncludesOptionalPhase(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

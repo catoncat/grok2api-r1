@@ -45,6 +45,7 @@ import {
   pollDeviceAuthorization,
   refreshAccountBilling,
   refreshAccountsQuota,
+  refreshAccountsTokens,
   refreshAccountToken,
   refreshAccountQuota,
   refreshAllAccountBilling,
@@ -362,6 +363,16 @@ export function AccountsPage() {
     onError: showError,
   });
 
+  const batchTokenMutation = useMutation({
+    mutationFn: () => refreshAccountsTokens([...selected], provider),
+    onSuccess: (result) => {
+      setSelected(new Set());
+      invalidateAccountData();
+      toast.success(t("accounts.allTokensRefreshed", result));
+    },
+    onError: showError,
+  });
+
   const batchDeleteMutation = useMutation({
     mutationFn: () => deleteAccounts([...selected], provider),
     onSuccess: () => {
@@ -527,6 +538,7 @@ export function AccountsPage() {
     || importMutation.isPending
     || batchUpdateMutation.isPending
     || batchBillingMutation.isPending
+    || batchTokenMutation.isPending
     || batchDeleteMutation.isPending;
 
   return (
@@ -604,6 +616,7 @@ export function AccountsPage() {
                 <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => batchUpdateMutation.mutate(false)}>{t("common.disable")}</Button>
                 {provider === "grok_web" ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => openBuildConversion([...selected])}>{t("accounts.convertToBuild")}</Button> : null}
                 {provider === "grok_web" ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => openWebConsoleSync([...selected])}>{t("webConsoleSync.action")}</Button> : null}
+                {provider === "grok_build" ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => batchTokenMutation.mutate()}><RotateCw />{t("accountCredential.refreshAction")}</Button> : null}
                 <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => batchBillingMutation.mutate()}>{t("accountCredential.quotaSyncAction")}</Button>
                 <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={bulkTaskPending} onClick={() => setBatchDeleteOpen(true)}>{t("common.delete")}</Button>
               </div>
