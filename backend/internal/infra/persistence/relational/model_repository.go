@@ -536,6 +536,25 @@ func (r *ModelRepository) Update(ctx context.Context, value model.Route, account
 	return r.Get(ctx, value.ID)
 }
 
+func (r *ModelRepository) AddAccountBinding(ctx context.Context, providerValue account.Provider, upstreamModel string, accountID uint64) error {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if !providerValue.IsValid() || upstreamModel == "" || accountID == 0 {
+		return fmt.Errorf("模型账号绑定参数无效")
+	}
+	return r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var route modelRouteModel
+		if err := tx.Where("provider = ? AND upstream_model = ? AND enabled = ?", providerValue, upstreamModel, true).First(&route).Error; err != nil {
+			return mapError(err)
+		}
+		var boundAccount accountModel
+		if err := tx.Where("id = ? AND provider = ?", accountID, providerValue).First(&boundAccount).Error; err != nil {
+			return mapError(err)
+		}
+		row := modelRouteAccountModel{ModelRouteID: route.ID, AccountID: boundAccount.ID}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
+	})
+}
+
 func (r *ModelRepository) Delete(ctx context.Context, id uint64) error {
 	result := r.db.db.WithContext(ctx).Delete(&modelRouteModel{}, id)
 	if result.Error != nil {

@@ -127,6 +127,10 @@ func (s *Service) GetByProviderUpstream(ctx context.Context, providerValue accou
 	return s.models.GetByProviderUpstream(ctx, providerValue, upstreamModel)
 }
 
+func (s *Service) AddAccountBinding(ctx context.Context, providerValue account.Provider, upstreamModel string, accountID uint64) error {
+	return mapRepositoryError(s.models.AddAccountBinding(ctx, providerValue, upstreamModel, accountID))
+}
+
 func (s *Service) Create(ctx context.Context, input CreateInput) (modeldomain.Route, error) {
 	publicID, validPublicID := modeldomain.NormalizePublicID(input.Provider, input.PublicID)
 	if !validPublicID {

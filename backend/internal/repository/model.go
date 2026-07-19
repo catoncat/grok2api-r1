@@ -17,6 +17,7 @@ type ModelRepository interface {
 	GetByPublicID(ctx context.Context, publicID string) (model.Route, error)
 	GetByPublicIDCandidates(ctx context.Context, publicID string) ([]model.Route, error)
 	GetByProviderUpstream(ctx context.Context, provider account.Provider, upstreamModel string) (model.Route, error)
+	AddAccountBinding(ctx context.Context, provider account.Provider, upstreamModel string, accountID uint64) error
 	UpsertDiscovered(ctx context.Context, provider account.Provider, upstreamModels []string) error
 	UpsertRoutes(ctx context.Context, values []model.Route) error
 	ReplaceProviderRoutes(ctx context.Context, provider account.Provider, values []model.Route) error
