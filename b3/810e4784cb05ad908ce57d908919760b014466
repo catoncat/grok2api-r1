@@ -1,0 +1,26 @@
+VERSION
+  s_e586d45d714a4a::t_cb169863c8f4ee 1
+backend/internal/app/startup_test.go
+  s_e586d45d714a4a::t_bc802c53e1eebd 31-57
+backend/internal/app/startup.go
+  s_e586d45d714a4a::t_52a7ff1860edb5 21-23,307,321-334
+  s_e586d45d714a4a::t_1f56e77833878a 17-20,335-336
+backend/internal/application/updatecheck/service_test.go
+  s_e586d45d714a4a::t_9e751aab662ffc 42,44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b3810e4784cb05ad908ce57d908919760b014466",
+  "prompts": {},
+  "sessions": {
+    "s_e586d45d714a4a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f769f-32ea-7ee0-919c-c10eea13b601",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
