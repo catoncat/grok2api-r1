@@ -1,0 +1,50 @@
+backend/internal/transport/http/account/handler_test.go
+  s_a917cebefb0e3d::t_555f5c5f42fa8c 9,16-17,126-161
+  s_a917cebefb0e3d::t_10bd548779eeb4 162-163
+backend/internal/transport/http/account/handler.go
+  s_a917cebefb0e3d::t_f209b46f5a93fc 144,181-187,425-439,444
+  s_a917cebefb0e3d::t_d1195f2ffcb944 440-443
+  s_a917cebefb0e3d::t_94f14c44d7b260 445
+backend/internal/infra/persistence/relational/account_repository.go
+  s_a917cebefb0e3d::t_d2f81e3111ce5f 7,779-793,799-811,822-823,826-828,830-835,837-838,840-843,845-866
+  s_a917cebefb0e3d::t_d2f4d2acca1e7e 794-798,812-821,824-825,829,836,839,844
+  s_a917cebefb0e3d::t_8e2e70e4f8bf12 867
+backend/internal/application/account/service.go
+  s_a917cebefb0e3d::t_ee81d4080cb9a1 156-167,170-173,424-455,458-470
+  s_a917cebefb0e3d::t_4a4d27a8292e15 168-169,456-457
+  s_a917cebefb0e3d::t_1ac99506267ba2 471
+backend/internal/infra/persistence/relational/account_cleanup_postgres_test.go
+  s_a917cebefb0e3d::t_ed8ab559f0eec9 1-72,76-100,102-110,112-114,116-138
+  s_a917cebefb0e3d::t_f027fbea8a0018 73-75,101,111,115
+backend/internal/application/account/account_cleanup_test.go
+  s_a917cebefb0e3d::t_c0e5a142ee0df5 1-13,15-77,79-95,97-99,101-133
+  s_a917cebefb0e3d::t_85b32a8bb56b7c 14,100
+  s_a917cebefb0e3d::t_4a780467fa2a56 78,96
+backend/internal/infra/persistence/relational/account_cleanup_test.go
+  s_a917cebefb0e3d::t_f16de82fd8ef8e 12,61-84,89-103
+  s_a917cebefb0e3d::t_09086d8e30cd33 1-4,6-10,13,106-120,125-128,130-142,144-149
+  s_a917cebefb0e3d::t_370d0261291344 41,53,129,143
+  s_a917cebefb0e3d::t_e373f84bf803fa 5,11,14-40,42-52,54-60,104-105
+  s_a917cebefb0e3d::t_57bf8dd613d901 85-88
+  s_a917cebefb0e3d::t_a909f2828d7a44 121-124
+backend/internal/repository/account.go
+  s_a917cebefb0e3d::t_5148b989298577 18
+  s_a917cebefb0e3d::t_aa2dd724e2674d 21-23,26-28,61
+  s_a917cebefb0e3d::t_b56f7bd1ecad37 19-20,24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e6f944c22430876795006633351e29ce0ae56bb7",
+  "prompts": {},
+  "sessions": {
+    "s_a917cebefb0e3d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f7d59-116d-7802-ade0-1a3cbd31aea0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
