@@ -153,6 +153,24 @@ type ImportedAccountObserver func(accountID uint64) error
 // BatchProgressObserver 在单个账号任务结束后报告批次完成数。
 type BatchProgressObserver func(completed, total int) error
 
+type CleanupStatus string
+
+const (
+	CleanupStatusDisabled       CleanupStatus = "disabled"
+	CleanupStatusReauthRequired CleanupStatus = "reauthRequired"
+	CleanupStatusCooldown       CleanupStatus = "cooldown"
+	maxCleanupAccounts                        = 500
+)
+
+type CleanupResult struct {
+	Matched   int
+	Protected int
+	Eligible  int
+	Skipped   int
+	Deleted   int
+	DryRun    bool
+}
+
 type ExportResult struct {
 	Data  []byte
 	Count int
@@ -401,6 +419,54 @@ func (s *Service) BatchDelete(ctx context.Context, ids []uint64) (int64, error) 
 	}
 	deleted, err := s.accounts.DeleteMany(ctx, ids)
 	return deleted, mapRepositoryError(err)
+}
+
+// CleanupAccounts 按明确状态、有限数量清理账号；调用方必须显式关闭 dry-run 才会删除。
+func (s *Service) CleanupAccounts(ctx context.Context, providerValue accountdomain.Provider, statuses []CleanupStatus, limit int, dryRun bool) (CleanupResult, error) {
+	if !providerValue.IsValid() {
+		return CleanupResult{}, invalidInput("账号来源无效")
+	}
+	if limit < 1 || limit > maxCleanupAccounts {
+		return CleanupResult{}, invalidInput(fmt.Sprintf("单次最多处理 %d 个账号", maxCleanupAccounts))
+	}
+	selected := make(map[CleanupStatus]struct{}, len(statuses))
+	for _, status := range statuses {
+		switch status {
+		case CleanupStatusDisabled, CleanupStatusReauthRequired, CleanupStatusCooldown:
+			selected[status] = struct{}{}
+		default:
+			return CleanupResult{}, invalidInput("账号清理状态无效")
+		}
+	}
+	if len(selected) == 0 {
+		return CleanupResult{}, invalidInput("至少选择一种账号状态")
+	}
+
+	result := CleanupResult{DryRun: dryRun}
+	for _, status := range []CleanupStatus{CleanupStatusDisabled, CleanupStatusReauthRequired, CleanupStatusCooldown} {
+		if _, ok := selected[status]; !ok || result.Matched >= limit {
+			continue
+		}
+		batch, err := s.accounts.CleanupAccountStatusBatch(ctx, providerValue, string(status), s.now(), limit-result.Matched, dryRun)
+		if err != nil {
+			return result, mapRepositoryError(err)
+		}
+		result.Matched += batch.Matched
+		result.Protected += batch.Protected
+		result.Eligible += batch.Eligible
+		result.Skipped += batch.Skipped
+		if dryRun {
+			continue
+		}
+		for _, id := range batch.DeletedIDs {
+			if s.sticky != nil {
+				_ = s.sticky.DeleteByAccount(ctx, id)
+			}
+			s.clearRefreshState(id)
+		}
+		result.Deleted += len(batch.DeletedIDs)
+	}
+	return result, nil
 }
 
 func (s *Service) Get(ctx context.Context, id uint64) (View, error) {

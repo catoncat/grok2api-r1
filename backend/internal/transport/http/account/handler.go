@@ -141,6 +141,7 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 	router.POST("/accounts/console/refresh-quotas", h.refreshAllConsoleQuotas)
 	router.POST("/accounts/refresh-billing", h.refreshAllBilling)
 	router.POST("/accounts/refresh-tokens", h.refreshAllTokens)
+	router.POST("/accounts/cleanup", h.cleanup)
 	router.POST("/accounts/batch/refresh-billing", h.batchRefreshBilling)
 	router.POST("/accounts/batch/refresh-quotas", h.batchRefreshQuotas)
 	router.POST("/accounts/batch/refresh-tokens", h.batchRefreshTokens)
@@ -175,6 +176,13 @@ type batchUpdateRequest struct {
 type batchDeleteRequest struct {
 	IDs      []string `json:"ids" binding:"required"`
 	Provider string   `json:"provider" binding:"required"`
+}
+
+type accountCleanupRequest struct {
+	Provider string                     `json:"provider" binding:"required"`
+	Statuses []accountapp.CleanupStatus `json:"statuses" binding:"required"`
+	Limit    int                        `json:"limit" binding:"required"`
+	DryRun   *bool                      `json:"dryRun"`
 }
 
 type buildConversionRequest struct {
@@ -412,6 +420,27 @@ func (h *Handler) batchDelete(c *gin.Context) {
 		return
 	}
 	response.Success(c, http.StatusOK, gin.H{"deleted": deleted})
+}
+
+func (h *Handler) cleanup(c *gin.Context) {
+	var request accountCleanupRequest
+	if c.ShouldBindJSON(&request) != nil {
+		response.Error(c, http.StatusBadRequest, "invalidRequest", "请求参数无效")
+		return
+	}
+	dryRun := true
+	if request.DryRun != nil {
+		dryRun = *request.DryRun
+	}
+	result, err := h.service.CleanupAccounts(c.Request.Context(), accountdomain.Provider(request.Provider), request.Statuses, request.Limit, dryRun)
+	if err != nil {
+		h.writeServiceError(c, "accountCleanupFailed", err, http.StatusInternalServerError, "清理账号失败")
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{
+		"matched": result.Matched, "protected": result.Protected, "eligible": result.Eligible,
+		"skipped": result.Skipped, "deleted": result.Deleted, "dryRun": result.DryRun,
+	})
 }
 
 func (h *Handler) batchRefreshBilling(c *gin.Context) {
