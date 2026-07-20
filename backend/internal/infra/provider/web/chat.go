@@ -160,14 +160,22 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	var parsed parsedChat
 	var previous *inferencedomain.WebResponseState
 	var excludedNodeID uint64
-	for attempt := 0; attempt < 2; attempt++ {
+	egressFailoverUsed := false
+	for attempt := 0; attempt < 3; attempt++ {
 		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0, excludedNodeID)
 		if openErr != nil {
-			if isStatsigMetaForbidden(openErr) && attempt == 0 && lease != nil {
-				excludedNodeID = lease.NodeID
+			if isStatsigMetaForbidden(openErr) && lease != nil {
+				failedNodeID := lease.NodeID
 				a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, http.StatusForbidden, nil)
 				lease.Release()
-				continue
+				if !egressFailoverUsed {
+					egressFailoverUsed = true
+					excludedNodeID = failedNodeID
+					a.log().Warn("web_statsig_egress_failover", "attempt", attempt+1, "node_id", failedNodeID)
+					continue
+				}
+				a.log().Warn("web_statsig_egress_failover_exhausted", "attempt", attempt+1, "node_id", failedNodeID)
+				return nil, openErr
 			}
 			if lease != nil {
 				lease.Release()

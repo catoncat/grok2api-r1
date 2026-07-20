@@ -53,6 +53,98 @@ func TestChatRetriesStatsigMetaForbiddenOnDifferentEgress(t *testing.T) {
 	}
 }
 
+func TestChatRotatesEgressWhenRefreshAfterCode7GetsIndexForbidden(t *testing.T) {
+	var upstreamCalls int
+	var firstNodeFetches int
+	adapter, credential, repository, firstNodeID, fetchNodes := newStatsigEgressRetryFixtureWithUpstream(t, func(firstNodeID uint64, lease *infraegress.Lease) (string, error) {
+		if lease.NodeID == firstNodeID {
+			firstNodeFetches++
+			if firstNodeFetches > 1 {
+				return "", &statsigMetaHTTPError{statusCode: http.StatusForbidden}
+			}
+		}
+		return "meta", nil
+	}, func(writer http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		if upstreamCalls == 1 {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(writer, `{"error":{"code":7,"message":"Request rejected by anti-bot rules."}}`)
+			return
+		}
+		writeStatsigRetrySuccess(writer)
+	})
+
+	response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
+		Credential: credential,
+		Method:     http.MethodPost,
+		Path:       "/responses",
+		Body:       []byte(`{"model":"grok-chat-fast","messages":[{"role":"user","content":"hello"}],"stream":false}`),
+		Model:      "grok-chat-fast",
+		Operation:  "chat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"content":"ok"`) {
+		t.Fatalf("status=%d body=%s err=%v", response.StatusCode, body, err)
+	}
+	if upstreamCalls != 2 {
+		t.Fatalf("upstream calls = %d, want 2", upstreamCalls)
+	}
+	if len(*fetchNodes) != 3 || (*fetchNodes)[0] != firstNodeID || (*fetchNodes)[1] != firstNodeID || (*fetchNodes)[2] == firstNodeID {
+		t.Fatalf("Statsig fetch nodes = %v, first=%d", *fetchNodes, firstNodeID)
+	}
+	failedNode, updates := repository.snapshot(firstNodeID)
+	if updates != 1 || failedNode.FailureCount != 1 || failedNode.LastError != "web rejection unconfirmed" {
+		t.Fatalf("failed node=%#v updates=%d", failedNode, updates)
+	}
+}
+
+func TestChatStopsWhenRefreshAfterCode7GetsTwoIndexForbiddenNodes(t *testing.T) {
+	var upstreamCalls int
+	var firstNodeFetches int
+	adapter, credential, repository, firstNodeID, fetchNodes := newStatsigEgressRetryFixtureWithUpstream(t, func(firstNodeID uint64, lease *infraegress.Lease) (string, error) {
+		if lease.NodeID == firstNodeID {
+			firstNodeFetches++
+			if firstNodeFetches == 1 {
+				return "meta", nil
+			}
+		}
+		return "", &statsigMetaHTTPError{statusCode: http.StatusForbidden}
+	}, func(writer http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(writer, `{"error":{"code":7,"message":"Request rejected by anti-bot rules."}}`)
+	})
+
+	response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
+		Credential: credential,
+		Method:     http.MethodPost,
+		Path:       "/responses",
+		Body:       []byte(`{"model":"grok-chat-fast","messages":[{"role":"user","content":"hello"}],"stream":false}`),
+		Model:      "grok-chat-fast",
+		Operation:  "chat",
+	})
+	if response != nil || !errors.Is(err, provider.ErrRequestSigning) || !isStatsigMetaForbidden(err) {
+		t.Fatalf("response=%#v err=%v", response, err)
+	}
+	if upstreamCalls != 1 {
+		t.Fatalf("upstream calls = %d, want 1", upstreamCalls)
+	}
+	if len(*fetchNodes) != 3 || (*fetchNodes)[0] != firstNodeID || (*fetchNodes)[1] != firstNodeID || (*fetchNodes)[2] == firstNodeID {
+		t.Fatalf("Statsig fetch nodes = %v, first=%d", *fetchNodes, firstNodeID)
+	}
+	_, firstUpdates := repository.snapshot(firstNodeID)
+	_, secondUpdates := repository.snapshot((*fetchNodes)[2])
+	if firstUpdates != 1 || secondUpdates != 1 {
+		t.Fatalf("Egress feedback updates first=%d second=%d", firstUpdates, secondUpdates)
+	}
+}
+
 func TestChatDoesNotRotateEgressForGenericSigningFailure(t *testing.T) {
 	adapter, credential, repository, firstNodeID, fetchNodes := newStatsigEgressRetryFixture(t, func(_ uint64, _ *infraegress.Lease) (string, error) {
 		return "", errors.New("signer unavailable")
@@ -97,9 +189,10 @@ func TestChatStopsAfterTwoStatsigMetaForbiddenNodes(t *testing.T) {
 	if len(*fetchNodes) != 2 || (*fetchNodes)[0] != firstNodeID || (*fetchNodes)[1] == firstNodeID {
 		t.Fatalf("Statsig fetch nodes = %v, first=%d", *fetchNodes, firstNodeID)
 	}
-	_, updates := repository.snapshot(firstNodeID)
-	if updates != 1 {
-		t.Fatalf("first forbidden node updated %d times", updates)
+	_, firstUpdates := repository.snapshot(firstNodeID)
+	_, secondUpdates := repository.snapshot((*fetchNodes)[1])
+	if firstUpdates != 1 || secondUpdates != 1 {
+		t.Fatalf("forbidden node updates first=%d second=%d", firstUpdates, secondUpdates)
 	}
 }
 
@@ -135,15 +228,19 @@ type statsigMetaFetcher func(firstNodeID uint64, lease *infraegress.Lease) (stri
 
 func newStatsigEgressRetryFixture(t *testing.T, fetch statsigMetaFetcher) (*Adapter, account.Credential, *multiTrackingEgressRepository, uint64, *[]uint64) {
 	t.Helper()
+	return newStatsigEgressRetryFixtureWithUpstream(t, fetch, func(writer http.ResponseWriter, _ *http.Request) {
+		writeStatsigRetrySuccess(writer)
+	})
+}
+
+func newStatsigEgressRetryFixtureWithUpstream(t *testing.T, fetch statsigMetaFetcher, upstreamHandler http.HandlerFunc) (*Adapter, account.Credential, *multiTrackingEgressRepository, uint64, *[]uint64) {
+	t.Helper()
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/rest/app-chat/conversations/new" {
 			http.NotFound(writer, request)
 			return
 		}
-		writer.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(writer, "data: {\"result\":{\"conversation\":{\"conversationId\":\"conv_1\"}}}\n")
-		_, _ = io.WriteString(writer, "data: {\"result\":{\"response\":{\"token\":\"ok\",\"isThinking\":false,\"messageTag\":\"final\"}}}\n")
-		_, _ = io.WriteString(writer, "data: [DONE]\n")
+		upstreamHandler(writer, request)
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -193,6 +290,13 @@ func newStatsigEgressRetryFixture(t *testing.T, fetch statsigMetaFetcher) (*Adap
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
 	})}
 	return adapter, credential, repository, firstNodeID, &fetchNodes
+}
+
+func writeStatsigRetrySuccess(writer http.ResponseWriter) {
+	writer.Header().Set("Content-Type", "text/event-stream")
+	_, _ = io.WriteString(writer, "data: {\"result\":{\"conversation\":{\"conversationId\":\"conv_1\"}}}\n")
+	_, _ = io.WriteString(writer, "data: {\"result\":{\"response\":{\"token\":\"ok\",\"isThinking\":false,\"messageTag\":\"final\"}}}\n")
+	_, _ = io.WriteString(writer, "data: [DONE]\n")
 }
 
 type multiTrackingEgressRepository struct {
