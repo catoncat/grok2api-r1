@@ -1,0 +1,24 @@
+backend/internal/infra/provider/web/chat.go
+  s_a917cebefb0e3d::t_c87b8778ab021e 167-168,171-178
+  s_a917cebefb0e3d::t_6e9556942e539d 163-164
+backend/internal/infra/provider/web/chat_statsig_egress_test.go
+  s_a917cebefb0e3d::t_d1a63377a62888 56-105,230-236,243,295-300
+  s_a917cebefb0e3d::t_2da48f49562eeb 106-147,192-195
+  s_a917cebefb0e3d::t_1fcdf18046e68f 301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "313a5679773d1e980209f68ee7172788e4d5c0f9",
+  "prompts": {},
+  "sessions": {
+    "s_a917cebefb0e3d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f7d59-116d-7802-ade0-1a3cbd31aea0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
