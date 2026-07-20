@@ -159,9 +159,19 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	streaming := input.Stream || request.Streaming
 	var parsed parsedChat
 	var previous *inferencedomain.WebResponseState
+	var excludedNodeID uint64
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0)
+		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0, excludedNodeID)
 		if openErr != nil {
+			if isStatsigMetaForbidden(openErr) && attempt == 0 && lease != nil {
+				excludedNodeID = lease.NodeID
+				a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, http.StatusForbidden, nil)
+				lease.Release()
+				continue
+			}
+			if lease != nil {
+				lease.Release()
+			}
 			if errors.Is(openErr, errInvalidChatImage) {
 				return jsonProviderResponse(http.StatusBadRequest, map[string]any{"error": map[string]any{
 					"message": openErr.Error(), "type": "invalid_request_error", "code": "invalid_image_input",
@@ -319,13 +329,13 @@ func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("Grok Web 首个流事件超过安全检查上限")
 }
 
-func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput, forceRemote bool) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
+func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput, forceRemote bool, excludedNodeID uint64) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
 	cfg := a.config()
 	token, err := a.cipher.Decrypt(credential.EncryptedAccessToken)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
-	lease, err := a.egress.AcquireCredential(ctx, domainegress.ScopeWeb, credential)
+	lease, err := a.egress.AcquireCredentialExcluding(ctx, domainegress.ScopeWeb, credential, excludedNodeID)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
@@ -368,8 +378,7 @@ func (a *Adapter) openChat(ctx context.Context, credential account.Credential, p
 	request.Header = buildSignedHeaders(token, lease, "application/json")
 	if err := a.applySignedStatsig(requestCtx, request, token, lease, forceRemote); err != nil {
 		cancel()
-		lease.Release()
-		return nil, nil, nil, "", err
+		return nil, lease, nil, endpoint, err
 	}
 	response, err := lease.Do(request)
 	if err != nil {

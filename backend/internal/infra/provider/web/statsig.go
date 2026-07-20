@@ -86,6 +86,19 @@ type statsigSigner struct {
 var errStatsigMetaInvalidated = errors.New("Statsig meta refresh invalidated")
 var errStatsigLocalCold = errors.New("local Statsig is not warmed")
 
+type statsigMetaHTTPError struct {
+	statusCode int
+}
+
+func (e *statsigMetaHTTPError) Error() string {
+	return fmt.Sprintf("Grok index 返回 %d", e.statusCode)
+}
+
+func isStatsigMetaForbidden(err error) bool {
+	var target *statsigMetaHTTPError
+	return errors.As(err, &target) && target.statusCode == http.StatusForbidden
+}
+
 func newStatsigSigner() *statsigSigner {
 	return &statsigSigner{
 		client: &http.Client{
@@ -450,7 +463,7 @@ func fetchStatsigMetaContent(ctx context.Context, baseURL, token string, lease *
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("Grok index 返回 %d", response.StatusCode)
+		return "", &statsigMetaHTTPError{statusCode: response.StatusCode}
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, statsigMetaBodyLimit+1))
 	if err != nil {
@@ -552,7 +565,7 @@ func (a *Adapter) applySignedStatsig(ctx context.Context, request *http.Request,
 		return nil
 	}
 	a.log().Warn("web_statsig_fetch_failed", "method", request.Method, "path", request.URL.EscapedPath(), "error", err)
-	return fmt.Errorf("%w: %v", provider.ErrRequestSigning, err)
+	return fmt.Errorf("%w: %w", provider.ErrRequestSigning, err)
 }
 
 func statsigGenerationFromResponse(response *http.Response) uint64 {
