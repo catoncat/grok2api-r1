@@ -1,0 +1,31 @@
+backend/internal/infra/provider/web/image.go
+  s_a917cebefb0e3d::t_0fbcf51b326e32 308-310
+  s_a917cebefb0e3d::t_334db3f88f4911 306
+backend/internal/infra/provider/web/chat.go
+  s_a917cebefb0e3d::t_800fa193557634 162,164,166-174,332,338,381
+backend/internal/infra/provider/web/statsig.go
+  s_a917cebefb0e3d::t_74907d7fac373e 89-101,466,568
+backend/internal/infra/egress/manager.go
+  s_a917cebefb0e3d::t_168b9832ffcd53 97,104-113,136,141,157-159
+  s_a917cebefb0e3d::t_9c5676900211bb 144
+backend/internal/infra/provider/web/chat_statsig_egress_test.go
+  s_a917cebefb0e3d::t_cdd97fb1b776cc 128
+  s_a917cebefb0e3d::t_002f66589bee0a 106-127,129-133
+  s_a917cebefb0e3d::t_9487290b09dac3 1-105,134-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b33667bfdad1e9d0aa739597323de93f4cd5bac5",
+  "prompts": {},
+  "sessions": {
+    "s_a917cebefb0e3d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f7d59-116d-7802-ade0-1a3cbd31aea0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
