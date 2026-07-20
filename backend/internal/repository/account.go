@@ -15,6 +15,17 @@ type AccountUpdates struct {
 	MinimumRemaining *float64
 }
 
+// AccountCleanupBatch 汇总一个有界状态批次；Matched 包含受模型路由绑定保护的候选，
+// Protected 只统计 model_route_accounts 已引用、因此不可删除的账号。Eligible 是预检时
+// 可删除的账号，Skipped 是执行前状态复检或最终绑定门禁阻止删除的账号。
+type AccountCleanupBatch struct {
+	Matched    int
+	Protected  int
+	Eligible   int
+	Skipped    int
+	DeletedIDs []uint64
+}
+
 type AccountUpsertResult struct {
 	ID      uint64
 	Created bool
@@ -47,6 +58,7 @@ type AccountRepository interface {
 	UpdateMany(ctx context.Context, ids []uint64, updates AccountUpdates) (int64, error)
 	Delete(ctx context.Context, id uint64) error
 	DeleteMany(ctx context.Context, ids []uint64) (int64, error)
+	CleanupAccountStatusBatch(ctx context.Context, provider account.Provider, status string, now time.Time, limit int, dryRun bool) (AccountCleanupBatch, error)
 	UpdateTokens(ctx context.Context, id uint64, accessToken, refreshToken string, expiresAt time.Time) (account.Credential, error)
 	BackfillCredentialRefreshSchedules(ctx context.Context, now time.Time, limit int) (int, error)
 	ListCriticalCredentialRefreshIDs(ctx context.Context, now, expiresBefore time.Time, limit int) ([]uint64, error)

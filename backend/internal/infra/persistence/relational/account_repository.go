@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -773,6 +774,95 @@ func (r *AccountRepository) DeleteMany(ctx context.Context, ids []uint64) (int64
 	}
 	result := r.db.db.WithContext(ctx).Where("id IN ?", ids).Delete(&accountModel{})
 	return result.RowsAffected, result.Error
+}
+
+func (r *AccountRepository) CleanupAccountStatusBatch(ctx context.Context, providerValue account.Provider, status string, now time.Time, limit int, dryRun bool) (repository.AccountCleanupBatch, error) {
+	if limit < 1 {
+		return repository.AccountCleanupBatch{}, nil
+	}
+	if !providerValue.IsValid() {
+		return repository.AccountCleanupBatch{}, fmt.Errorf("不支持清理账号来源 %q", providerValue)
+	}
+	if status != "disabled" && status != "reauthRequired" && status != "cooldown" {
+		return repository.AccountCleanupBatch{}, fmt.Errorf("不支持清理账号状态 %q", status)
+	}
+
+	result := repository.AccountCleanupBatch{}
+	err := r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var candidateIDs []uint64
+		selection := applyCleanupStatusFilter(tx.Model(&accountModel{}), providerValue, status, now)
+		if tx.Dialector.Name() == "postgres" {
+			// Parent-row locks serialize verified binding inserts with cleanup. Without this,
+			// PostgreSQL READ COMMITTED snapshots can miss a binding inserted beside DELETE.
+			selection = selection.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := selection.Order("id ASC").Limit(limit).Pluck("id", &candidateIDs).Error; err != nil {
+			return err
+		}
+		result.Matched = len(candidateIDs)
+		if len(candidateIDs) == 0 {
+			return nil
+		}
+
+		var protectedIDs []uint64
+		if err := tx.Table("model_route_accounts AS binding").
+			Where("binding.account_id IN ?", candidateIDs).
+			Distinct().Pluck("binding.account_id", &protectedIDs).Error; err != nil {
+			return err
+		}
+		protected := make(map[uint64]struct{}, len(protectedIDs))
+		for _, id := range protectedIDs {
+			protected[id] = struct{}{}
+		}
+		deletableIDs := make([]uint64, 0, len(candidateIDs)-len(protectedIDs))
+		for _, id := range candidateIDs {
+			if _, exists := protected[id]; !exists {
+				deletableIDs = append(deletableIDs, id)
+			}
+		}
+		result.Protected = len(protectedIDs)
+		result.Eligible = len(deletableIDs)
+		if dryRun || len(deletableIDs) == 0 {
+			return nil
+		}
+
+		deletion := applyCleanupStatusFilter(tx.Model(&accountModel{}).Where("provider_accounts.id IN ?", deletableIDs), providerValue, status, now)
+		deletion = deletion.Where("NOT EXISTS (SELECT 1 FROM model_route_accounts AS binding WHERE binding.account_id = provider_accounts.id)").Delete(&accountModel{})
+		if deletion.Error != nil {
+			return deletion.Error
+		}
+
+		var remainingIDs []uint64
+		if err := tx.Model(&accountModel{}).Where("id IN ?", deletableIDs).Pluck("id", &remainingIDs).Error; err != nil {
+			return err
+		}
+		result.Skipped = len(remainingIDs)
+		remaining := make(map[uint64]struct{}, len(remainingIDs))
+		for _, id := range remainingIDs {
+			remaining[id] = struct{}{}
+		}
+		for _, id := range deletableIDs {
+			if _, exists := remaining[id]; !exists {
+				result.DeletedIDs = append(result.DeletedIDs, id)
+			}
+		}
+		return nil
+	})
+	return result, err
+}
+
+func applyCleanupStatusFilter(query *gorm.DB, providerValue account.Provider, status string, now time.Time) *gorm.DB {
+	query = query.Where("provider_accounts.provider = ?", providerValue)
+	switch status {
+	case "disabled":
+		return query.Where("provider_accounts.enabled = ?", false)
+	case "reauthRequired":
+		return query.Where("provider_accounts.enabled = ? AND provider_accounts.auth_status = ?", true, account.AuthStatusReauthRequired)
+	case "cooldown":
+		return query.Where("provider_accounts.enabled = ? AND provider_accounts.auth_status = ? AND NOT "+accountRecoveryPredicate+" AND provider_accounts.cooldown_until > ?", true, account.AuthStatusActive, now)
+	default:
+		return query
+	}
 }
 
 func (r *AccountRepository) UpdateTokens(ctx context.Context, id uint64, accessToken, refreshToken string, expiresAt time.Time) (account.Credential, error) {
