@@ -303,8 +303,11 @@ func (e *liteUpstreamError) Response() *provider.Response {
 
 func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.Credential, spec ModelSpec, prompt string) (string, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt}, attempt > 0)
+		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt}, attempt > 0, 0)
 		if err != nil {
+			if lease != nil {
+				lease.Release()
+			}
 			return "", err
 		}
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {

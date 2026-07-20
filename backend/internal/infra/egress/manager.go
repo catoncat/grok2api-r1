@@ -94,13 +94,23 @@ func NewManager(repository repository.EgressRepository, cipher *security.Cipher)
 }
 
 func (m *Manager) Acquire(ctx context.Context, scope domain.Scope, affinity string) (*Lease, error) {
-	lease, _, err := m.acquire(ctx, scope, affinity, true, "")
+	lease, _, err := m.acquire(ctx, scope, affinity, true, "", 0)
 	return lease, err
 }
 
 // AcquireCredential binds the outbound proxy identity to one persisted
 // Provider credential. Resin templates use this identity as their Account.
 func (m *Manager) AcquireCredential(ctx context.Context, scope domain.Scope, credential accountdomain.Credential) (*Lease, error) {
+	return m.acquireCredential(ctx, scope, credential, 0)
+}
+
+// AcquireCredentialExcluding retries a credential on a different Egress node.
+// It is reserved for a node-scoped anti-bot signal, such as Grok /index 403.
+func (m *Manager) AcquireCredentialExcluding(ctx context.Context, scope domain.Scope, credential accountdomain.Credential, excludedNodeID uint64) (*Lease, error) {
+	return m.acquireCredential(ctx, scope, credential, excludedNodeID)
+}
+
+func (m *Manager) acquireCredential(ctx context.Context, scope domain.Scope, credential accountdomain.Credential, excludedNodeID uint64) (*Lease, error) {
 	identity := string(credential.Provider) + "_" + strconv.FormatUint(credential.ID, 10)
 	credentialCookies := ""
 	if scope != domain.ScopeBuild && strings.TrimSpace(credential.EncryptedCloudflareCookie) != "" {
@@ -123,15 +133,15 @@ func (m *Manager) AcquireCredential(ctx context.Context, scope domain.Scope, cre
 		identity = "sso_" + security.HashToken(token)[:32]
 	}
 	ctx = WithAccountIdentity(ctx, identity)
-	lease, _, err := m.acquire(ctx, scope, strconv.FormatUint(credential.ID, 10), true, credentialCookies)
+	lease, _, err := m.acquire(ctx, scope, strconv.FormatUint(credential.ID, 10), true, credentialCookies, excludedNodeID)
 	return lease, err
 }
 
 func (m *Manager) AcquireIfConfigured(ctx context.Context, scope domain.Scope, affinity string) (*Lease, bool, error) {
-	return m.acquire(ctx, scope, affinity, false, "")
+	return m.acquire(ctx, scope, affinity, false, "", 0)
 }
 
-func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity string, allowDirect bool, credentialCookies string) (*Lease, bool, error) {
+func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity string, allowDirect bool, credentialCookies string, excludedNodeID uint64) (*Lease, bool, error) {
 	now := time.Now().UTC()
 	configured := false
 	var selected domain.Node
@@ -144,6 +154,9 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 		configured = configured || len(nodes) > 0
 		candidateAvailable := make([]domain.Node, 0, len(nodes))
 		for _, node := range nodes {
+			if excludedNodeID != 0 && node.ID == excludedNodeID {
+				continue
+			}
 			if scope == domain.ScopeConsole && candidateScope == domain.ScopeWeb && !m.isStickyProxyNode(node) {
 				continue
 			}
