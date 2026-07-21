@@ -107,6 +107,15 @@ func imageGenerationUserError(message, param, code string) (*provider.Response, 
 	}}), nil
 }
 
+// imagineWebSocketError 把 Imagine WebSocket 的错误帧按 webResponseError 分类：
+// code 7 优先于 anti-bot 文本，且 code 7 绝不反馈 Egress。
+func imagineWebSocketError(message map[string]any) error {
+	if value, ok := message["error"].(map[string]any); ok {
+		return webResponseError(value)
+	}
+	return webResponseError(message)
+}
+
 func newImagineCollector() *imagineCollector {
 	return &imagineCollector{slots: make(map[string]*imagineSlot)}
 }
@@ -382,20 +391,32 @@ func (e *liteUpstreamError) Response() *provider.Response {
 
 func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.Credential, spec ModelSpec, prompt string) (string, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt})
+		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt}, attempt > 0, 0)
 		if err != nil {
+			if lease != nil {
+				lease.Release()
+			}
 			return "", err
 		}
 		if upstream.StatusCode < 200 || upstream.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(upstream.Body, 1<<20))
 			_ = upstream.Body.Close()
+			responseErr := webResponseErrorFromBody(body)
+			if errors.Is(responseErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
+					lease.Release()
+					continue
+				}
+				lease.Release()
+				return "", &liteUpstreamError{StatusCode: upstream.StatusCode, Status: upstream.Status, Body: body}
+			}
 			if upstream.StatusCode == http.StatusForbidden {
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
+			a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, upstream.StatusCode, nil)
 			lease.Release()
 			return "", &liteUpstreamError{StatusCode: upstream.StatusCode, Status: upstream.Status, Body: body}
 		}
@@ -422,14 +443,22 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 				return "", &liteUpstreamError{StatusCode: http.StatusTooManyRequests, Status: "429 Too Many Requests", Body: body}
 			}
 			status := 0
+			if errors.Is(consumeErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(statsigTarget, statsigGenerationFromResponse(upstream)) {
+					lease.Release()
+					continue
+				}
+				lease.Release()
+				return "", consumeErr
+			}
 			if errors.Is(consumeErr, errWebAntiBot) {
 				status = http.StatusForbidden
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget) {
+				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, status, consumeErr)
+			a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, status, consumeErr)
 			lease.Release()
 			if status == http.StatusForbidden {
 				response := antiBotProviderResponse()
@@ -651,8 +680,15 @@ func (a *Adapter) generateWSImage(ctx context.Context, request provider.ImageGen
 			continue
 		}
 		if message["type"] == "error" {
-			upstreamErr := fmt.Errorf("Imagine WebSocket 返回错误")
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, upstreamErr)
+			upstreamErr := imagineWebSocketError(message)
+			if errors.Is(upstreamErr, errWebCode7) {
+				return nil, upstreamErr
+			}
+			if errors.Is(upstreamErr, errWebAntiBot) {
+				a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, http.StatusForbidden, nil)
+			} else {
+				a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, upstreamErr)
+			}
 			return nil, upstreamErr
 		}
 		collector.Accept(message)
@@ -761,7 +797,7 @@ func (a *Adapter) EditImage(ctx context.Context, request provider.ImageEditReque
 		}
 	}
 	payload := buildImageEditPayload(request.Prompt, refs, parentID, ratio)
-	response, err := a.postJSONWithReferer(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/conversations/new", payload, time.Duration(cfg.ImageTimeoutSeconds)*time.Second, cfg.BaseURL+"/imagine/post/"+parentID)
+	response, err := a.postSignedJSON(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/conversations/new", payload, time.Duration(cfg.ImageTimeoutSeconds)*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -1185,7 +1221,7 @@ func (a *Adapter) uploadFileV2Direct(ctx context.Context, cfg Config, lease *egr
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if response.StatusCode == http.StatusForbidden {
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)
+			a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, response.StatusCode, nil)
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, directFileUploadResponseLimit))
 		return uploadedFile{}, fmt.Errorf("V2 上传文件返回 %d", response.StatusCode)
@@ -1257,7 +1293,7 @@ func directFileUploadFallbackStatus(statusCode int) bool {
 
 func (a *Adapter) uploadFileLegacy(ctx context.Context, cfg Config, lease *egress.Lease, token string, file provider.ImageInput, referer string) (uploadedFile, error) {
 	payload := map[string]any{"fileName": file.Filename, "fileMimeType": file.MIMEType, "content": base64.StdEncoding.EncodeToString(file.Data)}
-	response, err := a.postJSONWithReferer(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/upload-file", payload, time.Minute, referer)
+	response, err := a.postSignedJSON(ctx, cfg, lease, token, cfg.BaseURL+"/rest/app-chat/upload-file", payload, time.Minute)
 	if err != nil {
 		return uploadedFile{}, err
 	}
@@ -1359,10 +1395,10 @@ func parseMediaPostResponse(response *http.Response) (string, error) {
 }
 
 func (a *Adapter) postJSON(ctx context.Context, cfg Config, lease *egress.Lease, token, endpoint string, payload any, timeout time.Duration) (*http.Response, error) {
-	return a.postJSONWithReferer(ctx, cfg, lease, token, endpoint, payload, timeout, cfg.BaseURL+"/imagine")
+	return a.postSignedJSON(ctx, cfg, lease, token, endpoint, payload, timeout)
 }
 
-func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *egress.Lease, token, endpoint string, payload any, timeout time.Duration, referer string) (*http.Response, error) {
+func (a *Adapter) postSignedJSON(ctx context.Context, cfg Config, lease *egress.Lease, token, endpoint string, payload any, timeout time.Duration) (*http.Response, error) {
 	data, _ := json.Marshal(payload)
 	for attempt := 0; attempt < 2; attempt++ {
 		requestCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -1371,8 +1407,7 @@ func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *eg
 			cancel()
 			return nil, err
 		}
-		request.Header = buildHeaders(token, lease, "application/json")
-		applyAppHeaders(request.Header, cfg.BaseURL, referer)
+		request.Header = buildSignedHeaders(token, lease, "application/json")
 		if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
 			cancel()
 			return nil, err
@@ -1382,13 +1417,26 @@ func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *eg
 			cancel()
 			return nil, err
 		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			body, responseErr := peekWebResponseError(response.Body, 1<<20)
+			response.Body = body
+			if errors.Is(responseErr, errWebCode7) {
+				if attempt == 0 && a.retryAfterCode7(endpoint, statsigGenerationFromResponse(response)) {
+					_ = response.Body.Close()
+					cancel()
+					continue
+				}
+				response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
+				return response, nil
+			}
+		}
 		if response.StatusCode == http.StatusForbidden {
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
+			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint, statsigGenerationFromResponse(response)) {
 				_ = response.Body.Close()
 				cancel()
 				continue
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusForbidden, nil)
+			a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, http.StatusForbidden, nil)
 		}
 		response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
 		return response, nil
@@ -1496,7 +1544,11 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 			continue
 		}
 		if message["type"] == "error" {
-			upstreamErr := fmt.Errorf("Imagine WebSocket 返回错误")
+			upstreamErr := imagineWebSocketError(message)
+			if errors.Is(upstreamErr, errWebCode7) {
+				_ = writer.CloseWithError(upstreamErr)
+				return
+			}
 			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, upstreamErr)
 			_ = writer.CloseWithError(upstreamErr)
 			return
@@ -1590,6 +1642,13 @@ func (a *Adapter) saveStreamImage(ctx context.Context, raw []byte) error {
 	return nil
 }
 
+func imageAssetHeaders(token string, lease *egress.Lease) http.Header {
+	headers := buildHeaders(token, lease, "")
+	headers.Del("Content-Type")
+	headers.Set("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
+	return headers
+}
+
 func (a *Adapter) downloadImage(ctx context.Context, credential account.Credential, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme != "https" || !trustedImageAssetHost(parsed.Hostname()) || parsed.User != nil {
@@ -1638,7 +1697,7 @@ func (a *Adapter) downloadImageAttempt(ctx context.Context, credential account.C
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)
+		a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, response.StatusCode, nil)
 		retryable := response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooEarly || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500
 		return nil, retryable, fmt.Errorf("下载图片返回 %d", response.StatusCode)
 	}

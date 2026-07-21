@@ -9,9 +9,12 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	egressdomain "github.com/chenyme/grok2api/backend/internal/domain/egress"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
@@ -42,19 +45,6 @@ func TestParseCapturedWeeklyCreditsResponse(t *testing.T) {
 	}
 }
 
-func TestParseUnusedPreciseWeeklyCreditsResponse(t *testing.T) {
-	body, err := hex.DecodeString("00000000480a4612001a00220c08c5d5d3d20610c0c7a1ee012a0c08c5caf8d20610c0c7a1ee01421e0802120c08c5d5d3d20610c0c7a1ee011a0c08c5caf8d20610c0c7a1ee01580162006801800000000f677270632d7374617475733a300d0a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	window, err := parseWeeklyCreditsResponse(body, 42, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if window.Total != 10000 || window.Remaining != 10000 || window.UsagePercent != 0 || window.ResetAt == nil || window.ResetAt.Nanosecond() == 0 {
-		t.Fatalf("window = %#v", window)
-	}
-}
 
 func TestParseCoarseWeeklyCreditsResponseRemainsUnavailable(t *testing.T) {
 	body, err := hex.DecodeString("00000000300a2e12001a0022060880a6b6d2062a0608809bdbd2064212080212060880a6b6d2061a0608809bdbd206580162006801800000000f677270632d7374617475733a300d0a")
@@ -264,5 +254,59 @@ func TestSyncQuotaCorrectsStoredSuperFromFreshWebQuota(t *testing.T) {
 	}
 	if weeklyCalls.Load() != 0 {
 		t.Fatalf("basic account probed weekly endpoint %d times", weeklyCalls.Load())
+	}
+}
+
+func TestSyncQuotaModeCode7RetriesWithoutEgressFeedback(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte(`{"error":{"message":"signature rejected","code":7}}`))
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 10, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	_, err = adapter.SyncQuotaMode(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token}, "fast")
+	if err == nil || calls.Load() != 2 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
+	}
+}
+
+func TestSyncWeeklyCreditsCode7WithAntiBotTextDoesNotFeedbackEgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte(`{"error":{"message":"Request rejected by anti-bot rules.","code":7}}`))
+	}))
+	defer server.Close()
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := cipher.Encrypt("test-sso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &trackingEgressRepository{node: egressdomain.Node{ID: 11, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1, UserAgent: "test-agent"}}
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(repository, cipher), cipher, nil, nil)
+	_, err = adapter.syncWeeklyCredits(context.Background(), account.Credential{ID: 1, EncryptedAccessToken: token})
+	if err == nil || !strings.Contains(err.Error(), "code 7") {
+		t.Fatalf("error = %v", err)
+	}
+	node, updates := repository.snapshot()
+	if updates != 0 || node.Health != 1 || node.FailureCount != 0 || node.LastError != "" {
+		t.Fatalf("code 7 changed egress node=%#v updates=%d", node, updates)
 	}
 }

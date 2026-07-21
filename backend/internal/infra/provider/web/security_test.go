@@ -54,6 +54,56 @@ func TestWebHeadersOnlyUseSSOAndCloudflareCookies(t *testing.T) {
 	}
 }
 
+func TestSignedWebHeadersUseMinimalIdentitySet(t *testing.T) {
+	lease := &infraegress.Lease{UserAgent: "test-agent", CFCookies: "cf_clearance=clear"}
+	headers := buildSignedHeaders("token-value", lease, "application/json")
+	expected := map[string]string{
+		"Content-Type":    "application/json",
+		"Accept-Encoding": "gzip, deflate, br, zstd",
+		"User-Agent":      "test-agent",
+	}
+	for name, value := range expected {
+		if headers.Get(name) != value {
+			t.Fatalf("%s = %q", name, headers.Get(name))
+		}
+	}
+	if headers.Get("Cookie") == "" {
+		t.Fatal("signed headers must include the session cookie")
+	}
+	for _, name := range []string{
+		"Accept", "Accept-Language", "x-xai-request-id", "Origin", "Referer",
+		"Cache-Control", "Pragma", "Priority", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site",
+	} {
+		if value := headers.Get(name); value != "" {
+			t.Fatalf("signed headers include synthetic %s=%q", name, value)
+		}
+	}
+	if len(headers) != 4 {
+		t.Fatalf("signed header count = %d: %v", len(headers), headers)
+	}
+}
+
+func TestImageAssetHeadersCarrySessionIdentity(t *testing.T) {
+	lease := &infraegress.Lease{UserAgent: "test-agent", CFCookies: "cf_clearance=clear"}
+	headers := imageAssetHeaders("token-value", lease)
+	if headers.Get("User-Agent") != lease.UserAgent {
+		t.Fatalf("User-Agent = %q", headers.Get("User-Agent"))
+	}
+	if value := headers.Get("Accept"); !strings.Contains(value, "image/") {
+		t.Fatalf("Accept = %q", value)
+	}
+	if value := headers.Get("Content-Type"); value != "" {
+		t.Fatalf("Content-Type = %q", value)
+	}
+	cookie := headers.Get("Cookie")
+	for _, expected := range []string{"sso=token-value", "sso-rw=token-value", "cf_clearance=clear"} {
+		if !strings.Contains(cookie, expected) {
+			t.Fatalf("asset cookie missing %q", expected)
+		}
+	}
+	assertForbiddenFieldsAbsent(t, cookie)
+}
+
 func TestAppHeadersMatchStableBrowserFetchSignals(t *testing.T) {
 	headers := http.Header{}
 	applyAppHeaders(headers, "https://grok.com", "https://grok.com/")

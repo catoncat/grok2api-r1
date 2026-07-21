@@ -147,8 +147,7 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 		if requestErr != nil {
 			return account.QuotaWindow{}, requestErr
 		}
-		request.Header = buildHeaders(token, lease, "application/json")
-		applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/")
+		request.Header = buildSignedHeaders(token, lease, "application/json")
 		if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
 			return account.QuotaWindow{}, err
 		}
@@ -162,8 +161,14 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 		if err != nil {
 			return account.QuotaWindow{}, err
 		}
+		if errors.Is(webResponseErrorFromBody(body), errWebCode7) {
+			if attempt == 0 && a.retryAfterCode7(endpoint, statsigGenerationFromResponse(response)) {
+				continue
+			}
+			return account.QuotaWindow{}, fmt.Errorf("Grok Web 额度接口返回 code 7")
+		}
 		if response.StatusCode == http.StatusForbidden {
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
+			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint, statsigGenerationFromResponse(response)) {
 				continue
 			}
 		}
@@ -233,6 +238,9 @@ func (a *Adapter) syncWeeklyCredits(ctx context.Context, credential account.Cred
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
 		return account.QuotaWindow{}, err
+	}
+	if errors.Is(webResponseErrorFromBody(body), errWebCode7) {
+		return account.QuotaWindow{}, fmt.Errorf("Grok Web 周额度接口返回 code 7")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)
@@ -309,17 +317,11 @@ func parseWeeklyCreditsResponse(body []byte, accountID uint64, syncedAt time.Tim
 			config = config[consumed:]
 		}
 	}
-	if usagePresent && (math.IsNaN(usagePercent) || math.IsInf(usagePercent, 0) || usagePercent < 0 || usagePercent > 100) {
+	if !usagePresent || math.IsNaN(usagePercent) || math.IsInf(usagePercent, 0) || usagePercent < 0 || usagePercent > 100 {
 		return account.QuotaWindow{}, fmt.Errorf("Grok Web 周额度响应缺少有效使用率")
 	}
 	if periodStart == nil || periodEnd == nil || !periodEnd.After(*periodStart) {
 		return account.QuotaWindow{}, fmt.Errorf("Grok Web 周额度响应缺少有效周期")
-	}
-	if !usagePresent && periodStart.Nanosecond() == 0 && periodEnd.Nanosecond() == 0 {
-		// Free accounts return a coarse entitlement period without a usage rate.
-		// A paid, unused weekly pool has the same rate omitted but retains its
-		// precise period boundaries, which represents zero percent used.
-		return account.QuotaWindow{}, fmt.Errorf("Grok Web 周额度响应缺少有效使用率")
 	}
 	windowSeconds := int(periodEnd.Sub(*periodStart).Seconds())
 	if windowSeconds < 24*60*60 || windowSeconds > 31*24*60*60 {
