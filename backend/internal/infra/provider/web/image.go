@@ -1340,7 +1340,10 @@ func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *eg
 		}
 		request.Header = buildHeaders(token, lease, "application/json")
 		applyAppHeaders(request.Header, cfg.BaseURL, referer)
-		a.applySignedStatsig(requestCtx, request, token, lease)
+		if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
+			cancel()
+			return nil, err
+		}
 		response, err := lease.Do(request)
 		if err != nil {
 			cancel()
