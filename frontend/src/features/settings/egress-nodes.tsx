@@ -22,6 +22,10 @@ import { nextTableSort, type SortOrder, type TableSort } from "@/shared/lib/tabl
 
 const emptyInput: EgressNodeInput = { name: "", scope: "grok_build", enabled: true, proxyPool: false, proxyURL: "", userAgent: "", cloudflareCookies: "" };
 
+function usesManagedClearance(scope: EgressScope, mode: "manual" | "flaresolverr"): boolean {
+  return mode === "flaresolverr" && (scope === "grok_web" || scope === "grok_web_asset");
+}
+
 export function EgressNodes({ clearanceMode }: { clearanceMode: "manual" | "flaresolverr" }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -104,7 +108,7 @@ export function EgressNodes({ clearanceMode }: { clearanceMode: "manual" | "flar
                 <TableCell className="text-center text-xs text-muted-foreground">
                   {node.scope === "grok_build"
                     ? "—"
-                    : clearanceMode === "flaresolverr"
+                    : usesManagedClearance(node.scope, clearanceMode)
                       ? node.accountBoundProxy
                         ? `${t("settings.web.clearanceFlareSolverr")} · Resin`
                         : t("settings.web.clearanceFlareSolverr")
@@ -115,7 +119,7 @@ export function EgressNodes({ clearanceMode }: { clearanceMode: "manual" | "flar
                 <TableCell className="text-center text-xs tabular-nums">{Math.round(node.health * 100)}%</TableCell>
                 <TableActionCell>
                   <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" className="size-8" aria-label={t("common.actions")}><MoreHorizontal /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => openEdit(node)}><Pencil />{t("common.edit")}</DropdownMenuItem><DropdownMenuSeparator />{clearanceMode === "flaresolverr" && !node.accountBoundProxy && (node.scope === "grok_web" || node.scope === "grok_web_asset" || node.scope === "grok_console") ? <DropdownMenuItem disabled={refreshClearance.isPending} onClick={() => refreshClearance.mutate(node.id)}><RefreshCw />{t("settings.egress.refreshClearance")}</DropdownMenuItem> : null}
+                    <DropdownMenuItem onClick={() => openEdit(node)}><Pencil />{t("common.edit")}</DropdownMenuItem><DropdownMenuSeparator />{usesManagedClearance(node.scope, clearanceMode) && !node.accountBoundProxy ? <DropdownMenuItem disabled={refreshClearance.isPending} onClick={() => refreshClearance.mutate(node.id)}><RefreshCw />{t("settings.egress.refreshClearance")}</DropdownMenuItem> : null}
                     <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => remove.mutate(node.id)}><Trash2 />{t("common.delete")}</DropdownMenuItem>
                   </DropdownMenuContent></DropdownMenu>
                 </TableActionCell>
@@ -154,7 +158,7 @@ export function EgressNodes({ clearanceMode }: { clearanceMode: "manual" | "flar
               <div className="flex h-10 items-center justify-between gap-4 rounded-md bg-muted/45 px-3">
                 <span className="text-xs font-medium">{t("settings.egress.clearance")}</span>
                 <Badge variant="secondary" className="shrink-0 text-[10px]">
-                  {clearanceMode === "flaresolverr" ? t("settings.web.clearanceFlareSolverr") : t("settings.web.clearanceManual")}
+                  {usesManagedClearance(form.scope, clearanceMode) ? t("settings.web.clearanceFlareSolverr") : t("settings.web.clearanceManual")}
                 </Badge>
               </div>
             ) : null}
@@ -171,12 +175,12 @@ export function EgressNodes({ clearanceMode }: { clearanceMode: "manual" | "flar
               </div>
               <Switch id="egress-proxy-pool" className="mt-0.5" checked={form.proxyPool} disabled={!editing?.proxyConfigured && !form.proxyURL?.trim()} onCheckedChange={(proxyPool) => setForm({ ...form, proxyPool })} />
             </div>
-            {form.scope !== "grok_build" && clearanceMode === "manual" ? (
+            {form.scope !== "grok_build" && !usesManagedClearance(form.scope, clearanceMode) ? (
               <Field label={t("settings.egress.userAgent")} controlId="egress-user-agent">
                 <Input id="egress-user-agent" value={form.userAgent} onChange={(event) => setForm({ ...form, userAgent: event.target.value })} />
               </Field>
             ) : null}
-            {form.scope !== "grok_build" && clearanceMode === "manual" ? (
+            {form.scope !== "grok_build" && !usesManagedClearance(form.scope, clearanceMode) ? (
               <Field label={t("settings.egress.cloudflareCookie")} controlId="egress-cookie">
                 <Input id="egress-cookie" type="password" autoComplete="new-password" placeholder={editing?.cookieConfigured ? t("settings.egress.keepConfigured") : "cf_clearance=...; __cf_bm=..."} value={form.cloudflareCookies} onChange={(event) => setForm({ ...form, cloudflareCookies: event.target.value })} />
               </Field>

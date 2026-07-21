@@ -23,6 +23,7 @@ import (
 type Config struct {
 	BaseURL        string
 	SessionBaseURL string
+	UserAgent      string
 	TimeoutSeconds int
 }
 

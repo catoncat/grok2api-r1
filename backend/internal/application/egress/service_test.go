@@ -74,7 +74,7 @@ func TestBuildNodeAlwaysUsesProviderUserAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent")
+	service := NewService(nil, cipher, "web-agent", "console-agent")
 	value, err := service.applyInput(domain.Node{UserAgent: "legacy-build-agent"}, Input{
 		Name: "build", Scope: domain.ScopeBuild, Enabled: true, UserAgent: "custom-build-agent",
 	}, false)
@@ -84,23 +84,27 @@ func TestBuildNodeAlwaysUsesProviderUserAgent(t *testing.T) {
 	if value.UserAgent != "" || service.publicNode(value).UserAgent != "" {
 		t.Fatalf("build node userAgent = %q", value.UserAgent)
 	}
-	if defaults := service.DefaultUserAgents(); defaults[string(domain.ScopeBuild)] != "" || defaults[string(domain.ScopeWeb)] != "browser-agent" || defaults[string(domain.ScopeConsole)] != "browser-agent" {
+	if defaults := service.DefaultUserAgents(); defaults[string(domain.ScopeBuild)] != "" || defaults[string(domain.ScopeWeb)] != "web-agent" || defaults[string(domain.ScopeConsole)] != "console-agent" {
 		t.Fatalf("default user agents = %#v", defaults)
 	}
 }
 
-func TestConsoleNodeUsesBrowserDefaultUserAgent(t *testing.T) {
+func TestConsoleNodeUsesConsoleDefaultUserAgent(t *testing.T) {
 	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent")
+	service := NewService(nil, cipher, "web-agent", "console-agent")
 	value, err := service.applyInput(domain.Node{}, Input{Name: "console", Scope: domain.ScopeConsole, Enabled: true}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.UserAgent != "browser-agent" {
+	if value.UserAgent != "console-agent" {
 		t.Fatalf("console node userAgent = %q", value.UserAgent)
+	}
+	service.UpdateDefaults("next-web-agent", "next-console-agent")
+	if defaults := service.DefaultUserAgents(); defaults[string(domain.ScopeWeb)] != "next-web-agent" || defaults[string(domain.ScopeConsole)] != "next-console-agent" {
+		t.Fatalf("updated default user agents = %#v", defaults)
 	}
 }
 
@@ -113,7 +117,7 @@ func TestPublicNodeReportsAccountBoundProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent")
+	service := NewService(nil, cipher, "browser-agent", "console-agent")
 	cooldown := time.Now().UTC().Add(time.Minute)
 	public := service.publicNode(domain.Node{
 		Scope: domain.ScopeWeb, EncryptedProxyURL: encryptedProxy, Health: 0.2,
@@ -138,7 +142,7 @@ func TestApplyInputResetsHealthOnlyWhenEgressConfigurationChanges(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent")
+	service := NewService(nil, cipher, "browser-agent", "console-agent")
 	cooldown := time.Now().UTC().Add(time.Minute)
 	base := domain.Node{
 		Name: "node", Scope: domain.ScopeWeb, Enabled: true, Health: 0.2,
@@ -182,7 +186,7 @@ func TestProxyPoolRequiresConfiguredProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent")
+	service := NewService(nil, cipher, "browser-agent", "console-agent")
 	proxyPool := true
 	_, err = service.applyInput(domain.Node{}, Input{
 		Name: "pool", Scope: domain.ScopeBuild, Enabled: true, ProxyPool: &proxyPool,
