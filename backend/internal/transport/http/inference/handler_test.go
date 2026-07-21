@@ -557,6 +557,29 @@ func TestStreamInspectorAcceptsChatCachedOnlyFrame(t *testing.T) {
 	}
 }
 
+func TestResponseInspectorCapturesSafeStreamFailure(t *testing.T) {
+	inspector := &responseInspector{}
+	inspector.Inspect([]byte("data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"upstream_error\",\"message\":\"failed\"},\"output\":\"must-not-be-audited\"}}\n\n"))
+	metadata := inspector.Metadata()
+	if metadata.StreamFailure == nil {
+		t.Fatal("stream failure diagnostic was not captured")
+	}
+	body := string(metadata.StreamFailure.Body)
+	if !strings.Contains(body, "upstream_error") || !strings.Contains(body, "failed") || strings.Contains(body, "must-not-be-audited") {
+		t.Fatalf("stream failure diagnostic = %s", body)
+	}
+}
+
+func TestProjectStreamFailureDiagnosticBoundsPayload(t *testing.T) {
+	diagnostic := projectStreamFailureDiagnostic([]byte(`{"type":"error","error":{"code":"server_error","message":"` + strings.Repeat("x", maxStreamFailureDiagnosticBytes) + `"},"secret":"must-not-be-audited"}`))
+	if !diagnostic.BodyTruncated || len(diagnostic.Body) > maxStreamFailureDiagnosticBytes || len(diagnostic.Body) == 0 || !utf8.Valid(diagnostic.Body) {
+		t.Fatalf("diagnostic bounds = %#v", diagnostic)
+	}
+	if strings.Contains(string(diagnostic.Body), "must-not-be-audited") {
+		t.Fatalf("diagnostic leaked unsafe field: %s", diagnostic.Body)
+	}
+}
+
 func TestUsageInspectorHandlesChunkedSSE(t *testing.T) {
 	inspector := &responseInspector{}
 	inspector.Inspect([]byte("data: {\"response\":{\"id\":\"resp_stream\",\"usage\":{\"input_tokens\":2,"))
