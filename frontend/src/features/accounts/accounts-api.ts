@@ -6,6 +6,14 @@ import type { SortOrder } from "@/shared/lib/table-sort";
 export type AccountProvider = "grok_build" | "grok_web" | "grok_console";
 export type BuildRouteMode = "auto" | "build" | "xai";
 export type AccountCleanupStatus = "cooldown" | "disabled" | "reauthRequired";
+export type AccountCleanupResultDTO = {
+  matched: number;
+  protected: number;
+  eligible: number;
+  skipped: number;
+  deleted: number;
+  dryRun: boolean;
+};
 
 export type BillingDTO = {
   planCode?: string;
@@ -193,6 +201,9 @@ const decodeAccountSummary = createObjectDecoder<AccountSummaryDTO>("account sum
   providers: isRecordOf(hasShape({ total: isNumber, available: isNumber })),
   recovery: hasShape({ cooldown: isNumber, waitingReset: isNumber, probing: isNumber }),
   issues: hasShape({ disabled: isNumber, reauthRequired: isNumber }),
+});
+const decodeAccountCleanup = createObjectDecoder<AccountCleanupResultDTO>("account cleanup", {
+  matched: isNumber, protected: isNumber, eligible: isNumber, skipped: isNumber, deleted: isNumber, dryRun: isBoolean,
 });
 const decodeDeviceSession = createObjectDecoder<DeviceSessionDTO>("device session", {
   sessionId: isString, userCode: isString, verificationUri: isString, verificationUriComplete: isOptional(isString),
@@ -459,8 +470,8 @@ export function refreshAccountsTokens(ids: string[], provider: AccountProvider):
   return apiRequest("/api/admin/v1/accounts/batch/refresh-tokens", { method: "POST", body: { ids, provider } }, createObjectDecoder("account token refresh batch", { succeeded: isNumber, failed: isNumber, skipped: isNumber }));
 }
 
-export function cleanupAccounts(provider: AccountProvider, statuses: AccountCleanupStatus[]): Promise<{ deleted: number }> {
-  return apiRequest("/api/admin/v1/accounts/cleanup", { method: "POST", body: { provider, statuses } }, decodeCountResult<{ deleted: number }>("deleted"));
+export function cleanupAccounts(input: { provider: AccountProvider; statuses: AccountCleanupStatus[]; limit: number; dryRun: boolean }): Promise<AccountCleanupResultDTO> {
+  return apiRequest("/api/admin/v1/accounts/cleanup", { method: "POST", body: input }, decodeAccountCleanup);
 }
 
 export function deleteAccounts(ids: string[], provider: AccountProvider): Promise<{ deleted: number }> {

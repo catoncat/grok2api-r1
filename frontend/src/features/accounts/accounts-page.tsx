@@ -63,6 +63,7 @@ import {
   updateAccount,
   updateAccountsEnabled,
   type AccountDTO,
+  type AccountCleanupResultDTO,
   type AccountCleanupStatus,
   type AccountProvider,
   type AccountUpdateInput,
@@ -91,6 +92,8 @@ type BuildConversionProgressState = {
 };
 
 type WebConversionTarget = "build" | "console";
+
+const accountCleanupLimit = 500;
 
 type AccountSelection = {
   provider: AccountProvider;
@@ -122,6 +125,7 @@ export function AccountsPage() {
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupStatuses, setCleanupStatuses] = useState<Set<AccountCleanupStatus>>(() => new Set());
+  const [cleanupPreview, setCleanupPreview] = useState<AccountCleanupResultDTO | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [syncAllOpen, setSyncAllOpen] = useState(false);
   const [quotaSyncProgress, setQuotaSyncProgress] = useState<AccountTaskProgressDTO | null>(null);
@@ -470,10 +474,15 @@ export function AccountsPage() {
   });
 
   const cleanupMutation = useMutation({
-    mutationFn: () => cleanupAccounts(provider, [...cleanupStatuses]),
+    mutationFn: (dryRun: boolean) => cleanupAccounts({ provider, statuses: [...cleanupStatuses], limit: accountCleanupLimit, dryRun }),
     onSuccess: (result) => {
+      if (result.dryRun) {
+        setCleanupPreview(result);
+        return;
+      }
       setCleanupOpen(false);
       setCleanupStatuses(new Set());
+      setCleanupPreview(null);
       invalidateAccountData();
       toast.success(t("accounts.cleanupCompleted", result));
     },
@@ -529,6 +538,9 @@ export function AccountsPage() {
     setStatusFilter("");
     setRenewalFilter("");
     setRiskFilter("");
+    setCleanupOpen(false);
+    setCleanupStatuses(new Set());
+    setCleanupPreview(null);
     setQuickImportOpen(false);
     setQuickImportTokens("");
   }
@@ -1136,11 +1148,11 @@ export function AccountsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={cleanupOpen} onOpenChange={(open) => { if (!cleanupMutation.isPending) { setCleanupOpen(open); if (!open) setCleanupStatuses(new Set()); } }}>
+      <Dialog open={cleanupOpen} onOpenChange={(open) => { if (!cleanupMutation.isPending) { setCleanupOpen(open); if (!open) { setCleanupStatuses(new Set()); setCleanupPreview(null); } } }}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle>{t("accounts.cleanupTitle", { provider: provider === "grok_build" ? "Grok Build" : provider === "grok_web" ? "Grok Web" : "Grok Console" })}</DialogTitle>
-            <DialogDescription>{t("accounts.cleanupDescription")}</DialogDescription>
+            <DialogDescription>{t("accounts.cleanupDescription", { limit: accountCleanupLimit })}</DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
             {([
@@ -1152,19 +1164,36 @@ export function AccountsPage() {
                 <Checkbox
                   checked={cleanupStatuses.has(status)}
                   disabled={cleanupMutation.isPending}
-                  onCheckedChange={(checked) => setCleanupStatuses((current) => {
-                    const next = new Set(current);
-                    if (checked === true) next.add(status); else next.delete(status);
-                    return next;
-                  })}
+                  onCheckedChange={(checked) => {
+                    setCleanupPreview(null);
+                    setCleanupStatuses((current) => {
+                      const next = new Set(current);
+                      if (checked === true) next.add(status); else next.delete(status);
+                      return next;
+                    });
+                  }}
                 />
                 <span>{label}</span>
               </label>
             ))}
           </div>
+          {cleanupPreview ? (
+            <div className="border-t pt-3 text-xs">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                <span className="text-muted-foreground">{t("accounts.cleanupMatched")}</span><span className="text-right tabular-nums">{cleanupPreview.matched}</span>
+                <span className="text-muted-foreground">{t("accounts.cleanupProtected")}</span><span className="text-right tabular-nums">{cleanupPreview.protected}</span>
+                <span className="text-muted-foreground">{t("accounts.cleanupEligible")}</span><span className="text-right tabular-nums">{cleanupPreview.eligible}</span>
+                <span className="text-muted-foreground">{t("accounts.cleanupSkipped")}</span><span className="text-right tabular-nums">{cleanupPreview.skipped}</span>
+              </div>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button type="button" variant="secondary" size="sm" disabled={cleanupMutation.isPending} onClick={() => setCleanupOpen(false)}>{t("common.cancel")}</Button>
-            <Button type="button" variant="destructive" size="sm" disabled={cleanupMutation.isPending || cleanupStatuses.size === 0} onClick={() => cleanupMutation.mutate()}>{cleanupMutation.isPending ? <Spinner /> : null}{t("accounts.cleanupStart")}</Button>
+            {cleanupPreview ? (
+              <Button type="button" variant="destructive" size="sm" disabled={cleanupMutation.isPending || cleanupPreview.eligible === 0} onClick={() => cleanupMutation.mutate(false)}>{cleanupMutation.isPending ? <Spinner /> : <Trash2 />}{t("accounts.cleanupConfirm", { count: cleanupPreview.eligible })}</Button>
+            ) : (
+              <Button type="button" size="sm" disabled={cleanupMutation.isPending || cleanupStatuses.size === 0} onClick={() => cleanupMutation.mutate(true)}>{cleanupMutation.isPending ? <Spinner /> : null}{t("accounts.cleanupPreview")}</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
