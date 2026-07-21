@@ -8,6 +8,8 @@ import (
 	"net/http/httptrace"
 	"strings"
 	"testing"
+
+	fhttptrace "github.com/bogdanfinn/fhttp/httptrace"
 )
 
 type scriptedRequestClient struct {
@@ -108,6 +110,29 @@ func TestStickyLeaseDoesNotRetryAfterRequestWasWritten(t *testing.T) {
 	}
 	if client.calls != 1 || client.closedIdle != 1 {
 		t.Fatalf("calls=%d closedIdle=%d", client.calls, client.closedIdle)
+	}
+}
+
+func TestFHTTPRequestBridgesWroteRequestTrace(t *testing.T) {
+	written := false
+	request, err := http.NewRequest(http.MethodPost, "https://example.com/generate", strings.NewReader("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = request.WithContext(httptrace.WithClientTrace(request.Context(), &httptrace.ClientTrace{
+		WroteRequest: func(httptrace.WroteRequestInfo) { written = true },
+	}))
+	converted, err := toFHTTPRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := fhttptrace.ContextClientTrace(converted.Context())
+	if trace == nil || trace.WroteRequest == nil {
+		t.Fatal("fhttp request did not receive WroteRequest bridge")
+	}
+	trace.WroteRequest(fhttptrace.WroteRequestInfo{})
+	if !written {
+		t.Fatal("fhttp WroteRequest did not reach standard retry guard")
 	}
 }
 

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	fhttp "github.com/bogdanfinn/fhttp"
+	fhttptrace "github.com/bogdanfinn/fhttp/httptrace"
 	tlsclient "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/bogdanfinn/websocket"
@@ -35,9 +37,6 @@ func (l *Lease) DialWebSocket(ctx context.Context, endpoint string, headers fhtt
 		if err == nil || !l.proxyPool || attempt >= proxyPoolRetryLimit || !safeProxyConnectionFailure(err, fhttpResponseAsHTTP(response)) {
 			if l.proxyPool && safeProxyConnectionFailure(err, fhttpResponseAsHTTP(response)) {
 				l.browser.CloseIdleConnections()
-			}
-			if response != nil && response.StatusCode == http.StatusForbidden && l.clearanceManager != nil && l.clearanceKey != "" {
-				l.clearanceManager.invalidateClearanceKey(l.clearanceKey, l.client)
 			}
 			return connection, response, err
 		}
@@ -106,10 +105,10 @@ func (c *browserClient) Do(request *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return fromFHTTPResponse(fresponse), nil
+	return fromFHTTPResponse(fresponse, request), nil
 }
 
-func fromFHTTPResponse(fresponse *fhttp.Response) *http.Response {
+func fromFHTTPResponse(fresponse *fhttp.Response, request *http.Request) *http.Response {
 	header := http.Header(fresponse.Header).Clone()
 	contentLength := fresponse.ContentLength
 	if fresponse.Uncompressed {
@@ -124,6 +123,8 @@ func fromFHTTPResponse(fresponse *fhttp.Response) *http.Response {
 		Body: fresponse.Body, ContentLength: contentLength, TransferEncoding: transferEncoding,
 		// fhttp 在读取 Body 到 EOF 时原地填充 Trailer，因此这里必须保留共享 map。
 		Close: fresponse.Close, Uncompressed: fresponse.Uncompressed, Trailer: http.Header(fresponse.Trailer),
+		// 回填 Request 供调用方读取真实 UpstreamURL（responseUpstreamURL）。
+		Request: request,
 	}
 }
 
@@ -141,6 +142,14 @@ func toFHTTPRequest(request *http.Request) (*fhttp.Request, error) {
 	result, err := fhttp.NewRequestWithContext(request.Context(), request.Method, request.URL.String(), body)
 	if err != nil {
 		return nil, err
+	}
+	if trace := httptrace.ContextClientTrace(request.Context()); trace != nil && trace.WroteRequest != nil {
+		callback := trace.WroteRequest
+		result = result.WithContext(fhttptrace.WithClientTrace(result.Context(), &fhttptrace.ClientTrace{
+			WroteRequest: func(info fhttptrace.WroteRequestInfo) {
+				callback(httptrace.WroteRequestInfo{Err: info.Err})
+			},
+		}))
 	}
 	result.ContentLength = request.ContentLength
 	result.TransferEncoding = append([]string(nil), request.TransferEncoding...)
