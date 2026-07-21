@@ -1,0 +1,23 @@
+backend/internal/infra/persistence/relational/dashboard_repository_test.go
+  s_8eb1d458b8bf05::t_4987bc5091beda 5,7-8,10,14,16-17,38-39,82,105,117-145
+  s_8eb1d458b8bf05::t_f11a473f97e5aa 146-147
+backend/internal/infra/persistence/relational/postgres_integration_test.go
+  s_8eb1d458b8bf05::t_5df9af53c8ee28 10,13-51
+  s_8eb1d458b8bf05::t_03ede49b44ebc4 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "7317aaf556eb32be774e7c5104ce3332529b6404",
+  "prompts": {},
+  "sessions": {
+    "s_8eb1d458b8bf05": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8260-c3bc-76d6-99f9-88915a9a8818",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
