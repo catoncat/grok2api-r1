@@ -1,0 +1,197 @@
+backend/internal/infra/egress/manager.go
+  s_8cefdaccf172d2::t_838d511eff07ad 1155
+  s_8cefdaccf172d2::t_1a340d5d89b089 1152-1154
+  s_8cefdaccf172d2::t_c775c4e1d706ba 1156-1157
+  s_8cefdaccf172d2::t_3dcd7759bc62e0 32-36,43-55,67-71,81-114,135-164,202,210,212-220,284-290,304-313,323,335-346,516,604-609,661-667,702-707,713-1151
+backend/internal/infra/egress/manager_test.go
+  s_8cefdaccf172d2::t_504973a6028e0e 67,71,74,80,84,87-88,148,151-152,314-317,319-323,325-328,332-336,339-340,343-348,351-354,358-362,365-366,478-481,483-486,489-491,494,498-500,504,508-509,512-516,518-519,521-524,527-528,531-535,537-538,540-541,543-546,549-550,575-578,580-583,585-589,592-594,597-599,602-604,609,612-613,616-619,621-623,627-629,635,641-642,645-648,650-652,656-658,665-667,671-672,675-678,680-683,685-687,698-700,704-705,708-711,713-715,717-719,721-723,727-729,737,745-746,749-752,754-757,761-762,764-766,768-769,772-775,777,783-785,792-794,798-799,1236,1243,1245,1306-1340
+  s_8cefdaccf172d2::t_6564c6cdb3a039 64-66
+  s_8cefdaccf172d2::t_40368bad939958 68-70
+  s_8cefdaccf172d2::t_9671ea9d27a097 72-73
+  s_8cefdaccf172d2::t_1f2f43d2d9e6b4 75-79
+  s_8cefdaccf172d2::t_8e72eff5f047da 81-83
+  s_8cefdaccf172d2::t_3c30fc0f1d084d 85-86
+  s_8cefdaccf172d2::t_aebf1a3d52f478 89
+  s_8cefdaccf172d2::t_f7a8c597063044 145-147
+  s_8cefdaccf172d2::t_4425556595ba9c 149-150
+  s_8cefdaccf172d2::t_084de3c89235dd 153
+  s_8cefdaccf172d2::t_6587da9921f7e0 313
+  s_8cefdaccf172d2::t_4b7cc18a431374 318
+  s_8cefdaccf172d2::t_78624e39ae855b 324
+  s_8cefdaccf172d2::t_56e5aa8c46a373 329-331
+  s_8cefdaccf172d2::t_6f1aea68518ee5 337-338
+  s_8cefdaccf172d2::t_f977d9a7354957 341-342
+  s_8cefdaccf172d2::t_d03fd88f6ea35a 349-350
+  s_8cefdaccf172d2::t_06ef54d14f79f9 355-357
+  s_8cefdaccf172d2::t_f60471b332c177 363-364
+  s_8cefdaccf172d2::t_8fe52b029038f4 367
+  s_8cefdaccf172d2::t_bdb46d82b2d9f8 477
+  s_8cefdaccf172d2::t_78fb8ce42a8e24 482
+  s_8cefdaccf172d2::t_4184fdb99d21ef 487-488
+  s_8cefdaccf172d2::t_b1a8ba57682604 492-493
+  s_8cefdaccf172d2::t_dc5eada6ea97ed 495-497
+  s_8cefdaccf172d2::t_d8a6a6fa10e4d3 501-503
+  s_8cefdaccf172d2::t_62dd6f9b25d44a 505-507
+  s_8cefdaccf172d2::t_a504dd0bfd40a3 510-511
+  s_8cefdaccf172d2::t_01717ea7458125 517
+  s_8cefdaccf172d2::t_92bdc62e419eb4 520
+  s_8cefdaccf172d2::t_234807c8be2b4b 525-526
+  s_8cefdaccf172d2::t_0f969e87135883 529-530
+  s_8cefdaccf172d2::t_2e07ae65f3c855 536
+  s_8cefdaccf172d2::t_d095bc61aa2679 539
+  s_8cefdaccf172d2::t_4ee24a019ad94e 542
+  s_8cefdaccf172d2::t_b7b15ad9b02403 547-548
+  s_8cefdaccf172d2::t_1a1be86c06519d 551
+  s_8cefdaccf172d2::t_2f67f2d35be15e 574
+  s_8cefdaccf172d2::t_f115a9030ffac7 579
+  s_8cefdaccf172d2::t_60cd02cb312aeb 584
+  s_8cefdaccf172d2::t_d80ddfaa7d786e 590-591
+  s_8cefdaccf172d2::t_f1408919dd820c 595-596
+  s_8cefdaccf172d2::t_ea0eb957c0ed45 600-601
+  s_8cefdaccf172d2::t_54aa84ae2cf8fc 605-608
+  s_8cefdaccf172d2::t_6772fcb03f778a 610-611
+  s_8cefdaccf172d2::t_073805dfc77741 614-615
+  s_8cefdaccf172d2::t_0079d5b9f55099 620
+  s_8cefdaccf172d2::t_670f76d843b9a6 624-626
+  s_8cefdaccf172d2::t_169b32a7361055 630-634
+  s_8cefdaccf172d2::t_dcc4f7cfe8fe42 636-640
+  s_8cefdaccf172d2::t_7f531d7161130e 643-644
+  s_8cefdaccf172d2::t_67b6e50e2233aa 649
+  s_8cefdaccf172d2::t_5a72a9409dfa52 653-655
+  s_8cefdaccf172d2::t_48b03b2f731ebb 659-664
+  s_8cefdaccf172d2::t_a6bd5f45146f61 668-670
+  s_8cefdaccf172d2::t_00a0f93a219465 673-674
+  s_8cefdaccf172d2::t_eeeee7afa0e853 679
+  s_8cefdaccf172d2::t_909446c2ad0d93 684
+  s_8cefdaccf172d2::t_4e6577daea6978 688-690,695-697
+  s_8cefdaccf172d2::t_a184931b60ba10 701-703
+  s_8cefdaccf172d2::t_c1b3a456bcc9d9 706-707
+  s_8cefdaccf172d2::t_1fbcb6b9ba3aa1 712
+  s_8cefdaccf172d2::t_732c3f380e0a78 716
+  s_8cefdaccf172d2::t_9f0c798de48087 720
+  s_8cefdaccf172d2::t_bde0a0c9d25500 724-726
+  s_8cefdaccf172d2::t_92b15aea2c8452 730-732,734-736
+  s_8cefdaccf172d2::t_f14352624a99eb 738-740,742-744
+  s_8cefdaccf172d2::t_7d94d69cc010f8 747-748
+  s_8cefdaccf172d2::t_aa932bac7449a4 753
+  s_8cefdaccf172d2::t_18491dd4b77c24 758-760
+  s_8cefdaccf172d2::t_f85cd841d1770b 763
+  s_8cefdaccf172d2::t_2d0e37457f358e 767
+  s_8cefdaccf172d2::t_bc10cc17558212 770-771
+  s_8cefdaccf172d2::t_8222fe43f4020c 776
+  s_8cefdaccf172d2::t_e3a4d901f1f06f 778-782
+  s_8cefdaccf172d2::t_5513ee9b1836f2 786-791
+  s_8cefdaccf172d2::t_8ec4e6fd32d2eb 795-797
+  s_8cefdaccf172d2::t_131cd17e419e33 800
+  s_8cefdaccf172d2::t_6e8509a51a2759 1233-1235
+  s_8cefdaccf172d2::t_e83945ff2eb3c5 1237-1242
+  s_8cefdaccf172d2::t_47c03ff3538e93 1244
+  s_8cefdaccf172d2::t_169861b1a6d3a2 1246
+  s_8cefdaccf172d2::t_e07c0cdefc0201 14,62-63,691-694,733,741,1232
+frontend/src/features/settings/egress-nodes.tsx
+  s_8cefdaccf172d2::t_e884b51f792e3f 25-29,54-58,108-118,122-123,138,157-165,168-169,173
+  s_8cefdaccf172d2::t_969b522e043ade 2,17-18,189-204
+README.zh-CN.md
+  s_8cefdaccf172d2::t_ca7e2d516b4d09 341
+  s_8cefdaccf172d2::t_aab224cd21ba4e 338-340
+  s_8cefdaccf172d2::t_7df3d1a5bcf801 342
+  s_8cefdaccf172d2::t_fe379431f5ead7 331-337
+frontend/src/shared/i18n/index.ts
+  s_8cefdaccf172d2::t_7eb528f4563f0b 766,1058,1248
+  s_8cefdaccf172d2::t_54bb21d1f7f90c 83,762
+README.md
+  s_8cefdaccf172d2::t_d51c1b12b65a10 340
+  s_8cefdaccf172d2::t_491ac2a19c8313 337-339
+  s_8cefdaccf172d2::t_c42fd5575b1aec 341
+  s_8cefdaccf172d2::t_5844a5507c6610 330-336
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_cf447b51ca9711 68,193-194,200,298,338,363,382-389,504-515
+backend/internal/application/account/service.go
+  s_8cefdaccf172d2::t_244681963601e3 474,489-491
+backend/internal/application/egress/service.go
+  s_8cefdaccf172d2::t_618b13399c9ea4 17-20,47-52,66-71,91,102-105,121-124,132-134,138-161,219-223,234,242-243,248-255
+backend/internal/application/egress/service_test.go
+  s_8cefdaccf172d2::t_2c6cd85e2c2875 83,109-127
+backend/internal/application/gateway/service.go
+  s_8cefdaccf172d2::t_c833fb9ec87447 40
+backend/internal/application/gateway/video.go
+  s_8cefdaccf172d2::t_b82441c7fb11e2 49-52,83,495,520-528
+backend/internal/application/gateway/video_test.go
+  s_8cefdaccf172d2::t_907d051260b2e3 25,41,46-57
+backend/internal/application/settings/service.go
+  s_8cefdaccf172d2::t_69d1bcc457a8fd 43-46,55-57,276-291,295-296,353-355,422-425,452,456-457,473-478,504-506
+backend/internal/application/settings/service_test.go
+  s_8cefdaccf172d2::t_4cfbf976ca1bbf 94-124
+backend/internal/domain/egress/egress.go
+  s_8cefdaccf172d2::t_644376aeda77cd 23-38,42-55
+backend/internal/domain/media/job.go
+  s_8cefdaccf172d2::t_ee8e96bbc5f50d 14-20,23-45
+backend/internal/domain/settings/settings.go
+  s_8cefdaccf172d2::t_85b5f4d1ffe2b9 47-50
+backend/internal/infra/config/config.go
+  s_8cefdaccf172d2::t_55907d8e1bc790 23-24,26,144-147,447-461,570-571,605-611
+backend/internal/infra/config/config_test.go
+  s_8cefdaccf172d2::t_74d918aace73b2 251-273
+backend/internal/infra/egress/flaresolverr.go
+  s_8cefdaccf172d2::t_5858d1a1dbe394 1-174
+backend/internal/infra/egress/flaresolverr_test.go
+  s_8cefdaccf172d2::t_29e8f8f18c2f0b 1-68
+backend/internal/infra/egress/tlsclient.go
+  s_8cefdaccf172d2::t_201e64a66f4469 6,9-11,22-23,36-38,55,58,71-96
+backend/internal/infra/persistence/relational/egress_repository.go
+  s_8cefdaccf172d2::t_e81815fc5de732 5,66-107,123-125,138-140
+backend/internal/infra/persistence/relational/egress_sort_test.go
+  s_8cefdaccf172d2::t_0533e8d50c0fe7 6,8,47-76
+backend/internal/infra/persistence/relational/media_repository.go
+  s_8cefdaccf172d2::t_2566f15868c46f 269-271,283,299-301,383,395-399,418-420,459,471-474,482,489-490
+backend/internal/infra/persistence/relational/media_repository_test.go
+  s_8cefdaccf172d2::t_bf469fef2a0b80 128-189
+backend/internal/infra/persistence/relational/models.go
+  s_8cefdaccf172d2::t_294479cedacc21 374-402,455-470
+backend/internal/infra/persistence/relational/postgres_integration_test.go
+  s_8cefdaccf172d2::t_fdeb3ba1581384 8-9,14,31,117-142
+backend/internal/infra/persistence/relational/schema.go
+  s_8cefdaccf172d2::t_237e3bdfa2bb8d 5,7,9-10,13-14,80,87-88,123-133,190-261
+backend/internal/infra/persistence/relational/schema_media_job_upgrade_test.go
+  s_8cefdaccf172d2::t_46bb764f014029 5,8-9,43-155,203,302,319-332,347-350,361-386
+backend/internal/infra/provider/cli/adapter.go
+  s_8cefdaccf172d2::t_8d8465edbd4182 14,57,68-74,150-152,192,209,211,216,239
+backend/internal/infra/provider/cli/adapter_test.go
+  s_8cefdaccf172d2::t_17e252d449e63f 214-215,220-229,231,234,237-238,265-283,296
+backend/internal/infra/provider/cli/responses_reasoning_recovery.go
+  s_8cefdaccf172d2::t_ba7b660d16a304 19-44,46-53,60,63,65,70,74-79,82-112,114-115,119-120,123,125-126,128,130-209
+backend/internal/infra/provider/cli/responses_reasoning_recovery_test.go
+  s_8cefdaccf172d2::t_290fb4073a9103 171-268,288
+backend/internal/transport/http/egress/handler.go
+  s_8cefdaccf172d2::t_b145a0b328cafd 7,25,29-40,53-64,133-134,156-159
+backend/internal/transport/http/inference/handler.go
+  s_8cefdaccf172d2::t_40a42089a0936c 587-588,1471-1473
+backend/internal/transport/http/inference/handler_test.go
+  s_8cefdaccf172d2::t_80dcc5727229f9 141-153
+backend/internal/transport/http/settings/handler.go
+  s_8cefdaccf172d2::t_f24a178a0f8f11 68-84,160-162,173-176,209,227-229,269-277
+docker-compose.yml
+  s_8cefdaccf172d2::t_405139ce742deb 22-44
+frontend/src/features/settings/settings-api.ts
+  s_8cefdaccf172d2::t_cda3432611fe89 11,30,56-57,67,74,77,82,119-122
+frontend/src/features/settings/settings-model.ts
+  s_8cefdaccf172d2::t_84aa36e0d897b9 56-59,78-80,125,158,248-259
+frontend/src/features/settings/settings-page.tsx
+  s_8cefdaccf172d2::t_8aa133cbfe697f 2,33-34,177-196,198,285,295,300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "685bd7fa62caa50642f0773788b53a42aabd719b",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
