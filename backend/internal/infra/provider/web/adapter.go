@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"sync"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
@@ -34,13 +35,14 @@ type Adapter struct {
 	cipher          *security.Cipher
 	states          repository.ResponseRepository
 	assets          provider.ImageAssetStore
+	assetClient     *http.Client
 	statsig         *statsigSigner
 	logger          *slog.Logger
 }
 
 func NewAdapter(cfg Config, egress *infraegress.Manager, cipher *security.Cipher, states repository.ResponseRepository, assets provider.ImageAssetStore) *Adapter {
 	cfg = normalizedConfig(cfg)
-	return &Adapter{cfg: cfg, accountsBaseURL: officialAccountsBaseURL, egress: egress, cipher: cipher, states: states, assets: assets, statsig: newStatsigSigner(), logger: slog.Default()}
+	return &Adapter{cfg: cfg, accountsBaseURL: officialAccountsBaseURL, egress: egress, cipher: cipher, states: states, assets: assets, assetClient: newDirectImageClient(), statsig: newStatsigSigner(), logger: slog.Default()}
 }
 
 func (a *Adapter) SetLogger(logger *slog.Logger) {
