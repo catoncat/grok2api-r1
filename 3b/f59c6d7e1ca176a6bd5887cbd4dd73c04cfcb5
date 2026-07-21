@@ -1,0 +1,54 @@
+frontend/src/shared/i18n/index.ts
+  s_8eb1d458b8bf05::t_49b5b73cc1917c 263,274-277,291-299,301,317-325
+  s_8eb1d458b8bf05::t_5429d2c70e49fa 982
+backend/internal/application/dashboard/service.go
+  s_8eb1d458b8bf05::t_6b4d21234f01ed 45-48,69,71,122-127,129-132,148-149,152,158-168,198,222,231-233,238-249
+backend/internal/application/dashboard/service_test.go
+  s_8eb1d458b8bf05::t_2807604d3bf688 9,12,15-19,28,37-38,49,112-114,117,126-127,131-134,146-147,163-172,186,189,191-192
+backend/internal/domain/dashboard/dashboard.go
+  s_8eb1d458b8bf05::t_01b50cd846e35d 7-9,53-63,69-74
+backend/internal/infra/persistence/relational/dashboard_repository.go
+  s_8eb1d458b8bf05::t_b57a2d93f67548 9,11-12,20-23,25-27,29-30,32,36,40-44,47,74-76,83,111-146,162-163,167-168,171-176,178-183,186-198,206-217
+backend/internal/infra/persistence/relational/dashboard_repository_test.go
+  s_8eb1d458b8bf05::t_a919e4617de76c 5,9-10,58,68-69,73,93,96-105,122,127-128,132,135-157,159-176,194-200
+backend/internal/repository/dashboard.go
+  s_8eb1d458b8bf05::t_31e7114e7dad46 10-15,18
+backend/internal/transport/http/dashboard/handler.go
+  s_8eb1d458b8bf05::t_e563d28bdf1c31 9,21-29,40-42,63-71,74-82,117-121,127-130,138-140,146,148,150,153-171
+backend/internal/transport/http/dashboard/handler_test.go
+  s_8eb1d458b8bf05::t_f401e1420dc2a6 13,20-24,42-44,50,81
+frontend/src/features/dashboard/dashboard-activity.tsx
+  s_8eb1d458b8bf05::t_546205d5a4edba 1-110
+frontend/src/features/dashboard/dashboard-api.ts
+  s_8eb1d458b8bf05::t_a024ab0dfa0c2a 7-19,27-29,32-33,35-37,39,44-49,60-61,63,65,67
+frontend/src/features/dashboard/dashboard-format.ts
+  s_8eb1d458b8bf05::t_1116e9b35489a7 1-21
+frontend/src/features/dashboard/dashboard-overview.tsx
+  s_8eb1d458b8bf05::t_a3b0e72e84b356 1-177
+frontend/src/features/dashboard/dashboard-page.tsx
+  s_8eb1d458b8bf05::t_29b2e217cd5e3d 2-3,7-12,16,19,22,29,32,36,41,56,61-62,65,67-86,91,93,95-101,104-110,122-123
+frontend/src/features/dashboard/dashboard-panel.tsx
+  s_8eb1d458b8bf05::t_91698bd4258ea0 1-24
+frontend/src/features/dashboard/dashboard-provider-distribution.tsx
+  s_8eb1d458b8bf05::t_2b4d94552df2ae 1-145
+frontend/src/features/dashboard/dashboard-top-models.tsx
+  s_8eb1d458b8bf05::t_ab835817f7b237 1-110
+frontend/src/features/dashboard/dashboard-trend.tsx
+  s_8eb1d458b8bf05::t_30d907327a620e 1-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "3bf59c6d7e1ca176a6bd5887cbd4dd73c04cfcb5",
+  "prompts": {},
+  "sessions": {
+    "s_8eb1d458b8bf05": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8260-c3bc-76d6-99f9-88915a9a8818",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
