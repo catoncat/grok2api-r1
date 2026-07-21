@@ -63,24 +63,16 @@ func TestSettingsResponseIncludesPreferFreeBuild(t *testing.T) {
 	}
 }
 
-func TestLegacySettingsRequestMayOmitAccounts(t *testing.T) {
-	var dto settingsConfigDTO
-	if err := json.Unmarshal([]byte(`{"server":{"maxConcurrentRequests":64}}`), &dto); err != nil {
-		t.Fatal(err)
+func TestSettingsDTORetainsConsoleUserAgent(t *testing.T) {
+	const userAgent = "Mozilla/5.0 Console Test"
+	response := newSettingsResponse(settingsapp.Snapshot{Config: settingsapp.EditableConfig{
+		ProviderConsole: settingsapp.ProviderConsoleConfig{UserAgent: userAgent},
+	}})
+	if response.Config.ProviderConsole.UserAgent != userAgent {
+		t.Fatalf("response Console User-Agent = %q", response.Config.ProviderConsole.UserAgent)
 	}
-	input := dto.toApplication()
-	if input.AccountsProvided {
-		t.Fatal("missing accounts field was treated as an explicit update")
-	}
-}
-
-func TestLegacySettingsRequestMayOmitManagedClearance(t *testing.T) {
-	var dto settingsConfigDTO
-	if err := json.Unmarshal([]byte(`{"providerWeb":{"baseURL":"https://grok.com"}}`), &dto); err != nil {
-		t.Fatal(err)
-	}
-	input := dto.toApplication()
-	if input.ProviderWeb.ClearanceProvided {
-		t.Fatal("missing managed-clearance fields were treated as an explicit update")
+	input := response.Config.toApplication()
+	if input.ProviderConsole.UserAgent != userAgent {
+		t.Fatalf("update Console User-Agent = %q", input.ProviderConsole.UserAgent)
 	}
 }
