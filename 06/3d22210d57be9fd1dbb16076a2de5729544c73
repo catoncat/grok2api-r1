@@ -1,0 +1,33 @@
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_94b355f33fb1b9 214-230
+backend/internal/infra/provider/console/adapter.go
+  s_8cefdaccf172d2::t_ccc6f741c88c1f 82-87,90-91,94-101,151,168
+  s_8cefdaccf172d2::t_154544dba93139 57
+backend/internal/infra/provider/console/catalog.go
+  s_8cefdaccf172d2::t_cb520c79f01bd2 10,18,27-29,83-115,117-118,120
+  s_8cefdaccf172d2::t_8fe8892b116a7d 116
+  s_8cefdaccf172d2::t_1a4ccca79fdde2 119
+  s_8cefdaccf172d2::t_e6042201cbae37 121
+backend/internal/infra/persistence/relational/account_repository.go
+  s_8cefdaccf172d2::t_286f75b3a02b52 1392-1459
+backend/internal/infra/persistence/relational/console_provider_test.go
+  s_8cefdaccf172d2::t_1b6a25ac91711d 70-152
+backend/internal/infra/provider/console/console_test.go
+  s_8cefdaccf172d2::t_511845df4a2835 485-532
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "063d22210d57be9fd1dbb16076a2de5729544c73",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
