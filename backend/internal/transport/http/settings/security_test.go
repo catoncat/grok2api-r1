@@ -62,3 +62,17 @@ func TestSettingsResponseIncludesPreferFreeBuild(t *testing.T) {
 		t.Fatal("preferFreeBuild was lost from settings response")
 	}
 }
+
+func TestSettingsDTORetainsConsoleUserAgent(t *testing.T) {
+	const userAgent = "Mozilla/5.0 Console Test"
+	response := newSettingsResponse(settingsapp.Snapshot{Config: settingsapp.EditableConfig{
+		ProviderConsole: settingsapp.ProviderConsoleConfig{UserAgent: userAgent},
+	}})
+	if response.Config.ProviderConsole.UserAgent != userAgent {
+		t.Fatalf("response Console User-Agent = %q", response.Config.ProviderConsole.UserAgent)
+	}
+	input := response.Config.toApplication()
+	if input.ProviderConsole.UserAgent != userAgent {
+		t.Fatalf("update Console User-Agent = %q", input.ProviderConsole.UserAgent)
+	}
+}

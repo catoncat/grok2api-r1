@@ -68,7 +68,7 @@ export function SettingsPage() {
       {loading ? <div className="flex min-h-64 items-center justify-center"><Spinner /></div> : null}
       {snapshot ? (
         <Tabs defaultValue="build" className="flex flex-col gap-7 lg:flex-row lg:items-start">
-          <TabsList className="flex h-auto w-full shrink-0 justify-start gap-1 overflow-visible rounded-none bg-transparent p-0 [&>span]:rounded-md [&>span]:bg-muted/70 [&>span]:shadow-none lg:w-56 lg:flex-col lg:items-stretch">
+          <TabsList className="grid h-auto w-full shrink-0 grid-cols-2 justify-start gap-1 overflow-visible rounded-none bg-transparent p-0 sm:grid-cols-3 [&>span]:rounded-md [&>span]:bg-muted/70 [&>span]:shadow-none lg:flex lg:w-56 lg:flex-col lg:items-stretch">
             <TabsTrigger className="h-9 w-full shrink-0 justify-start rounded-md px-3 text-xs data-[state=active]:font-medium" value="build">{t("models.providerGrokBuild")}</TabsTrigger>
             <TabsTrigger className="h-9 w-full shrink-0 justify-start rounded-md px-3 text-xs data-[state=active]:font-medium" value="web">{t("settings.web.title")}</TabsTrigger>
             <TabsTrigger className="h-9 w-full shrink-0 justify-start rounded-md px-3 text-xs data-[state=active]:font-medium" value="console">{t("console.name")}</TabsTrigger>
@@ -142,6 +142,7 @@ export function SettingsPage() {
           <SettingsSection title={t("console.name")}>
             <div className="space-y-0">
               <SettingsField controlId="console-base-url" className="sm:col-span-2" label={t("console.baseURL")} description={t("settings.console.baseURLHelp")} error={form.formState.errors.providerConsole?.baseURL?.message}><Input id="console-base-url" type="url" {...form.register("providerConsole.baseURL")} /></SettingsField>
+              <SettingsField controlId="console-user-agent" label={t("settings.provider.userAgent")} description={t("settings.console.userAgentHelp")} error={form.formState.errors.providerConsole?.userAgent?.message}><Input id="console-user-agent" {...form.register("providerConsole.userAgent")} /></SettingsField>
               <SettingsField controlId="console-chat-timeout" label={t("console.chatTimeout")} description={t("settings.console.chatTimeoutHelp")} error={form.formState.errors.providerConsole?.chatTimeout?.message}><Controller control={form.control} name="providerConsole.chatTimeout" render={({ field }) => <DurationInput id="console-chat-timeout" value={field.value} onChange={field.onChange} />} /></SettingsField>
             </div>
           </SettingsSection>
