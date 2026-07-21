@@ -45,27 +45,28 @@ import (
 
 // Application 管理后端进程生命周期和本地后台任务。
 type Application struct {
-	logger        *slog.Logger
-	database      *relational.Database
-	server        *http.Server
-	audits        *auditapp.Service
-	responses     repository.ResponseRepository
-	runtime       io.Closer
-	settingsBus   repository.SettingsChangeBus
-	settings      *settingsapp.Service
-	gateway       *gateway.Service
-	media         *mediaapp.Service
-	quotaRecovery *quotarecoveryapp.Service
-	accounts      *accountapp.Service
-	models        *modelapp.Service
-	clientKeys    *clientkeyapp.Service
-	updates       *updatecheckapp.Service
-	accountRepo   repository.AccountRepository
-	modelRepo     repository.ModelRepository
-	providers     *provider.Registry
-	web           *webprovider.Adapter
-	egress        *infraegress.Manager
-	startup       *startupState
+	logger          *slog.Logger
+	database        *relational.Database
+	server          *http.Server
+	audits          *auditapp.Service
+	responses       repository.ResponseRepository
+	runtime         io.Closer
+	settingsBus     repository.SettingsChangeBus
+	settings        *settingsapp.Service
+	gateway         *gateway.Service
+	media           *mediaapp.Service
+	quotaRecovery   *quotarecoveryapp.Service
+	accounts        *accountapp.Service
+	models          *modelapp.Service
+	clientKeys      *clientkeyapp.Service
+	updates         *updatecheckapp.Service
+	accountRepo     repository.AccountRepository
+	startupAccounts startupAccountRepository
+	modelRepo       repository.ModelRepository
+	providers       *provider.Registry
+	web             *webprovider.Adapter
+	egress          *infraegress.Manager
+	startup         *startupState
 }
 
 // New 完成数据库、Provider、应用服务和 HTTP 路由装配。
@@ -215,6 +216,23 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		database.Close()
 		return nil, fmt.Errorf("校验 Provider 注册表: %w", err)
 	}
+	consoleQuotaModes := consoleprovider.QuotaModes()
+	migratedConsoleQuotaWindows, err := accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console", consoleQuotaModes)
+	if err == nil {
+		var aliases int64
+		aliases, err = accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console:grok-4.20-0309", []string{"console:grok-4.20-0309-reasoning"})
+		migratedConsoleQuotaWindows += aliases
+	}
+	if err != nil {
+		if runtimeStore != nil {
+			_ = runtimeStore.Close()
+		}
+		database.Close()
+		return nil, fmt.Errorf("迁移 Grok Console 模型额度窗口: %w", err)
+	}
+	if migratedConsoleQuotaWindows > 0 {
+		logger.Info("console_quota_windows_migrated", "legacy_windows", migratedConsoleQuotaWindows, "model_windows", len(consoleQuotaModes))
+	}
 	adminService := adminauth.NewService(adminRepo, sessionRepo, security.NewTokenService(cfg.Secrets.JWTSecret), cfg.Auth.AccessTokenTTL.Value(), cfg.Auth.RefreshTokenTTL.Value())
 	adminService.SetLoginRateLimiter(rateLimiter)
 	if err := adminService.Bootstrap(ctx, cfg.BootstrapAdmin.Username, cfg.BootstrapAdmin.Password); err != nil {
@@ -235,8 +253,6 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	accountService := accountapp.NewService(accountRepo, auditRepo, deviceSessions, sticky, providers, cipher, refreshLock)
 	cliAdapter.SetFallbackMarker(accountService)
 	accountService.SetLogger(logger)
-	accountService.UpdateAutoCleanConfig(accountAutoCleanConfig(cfg.Accounts))
-	accountService.SetConcurrencyLimiter(concurrency)
 	accountService.SetQuotaRecoveryQueue(quotaQueue)
 	accountService.SetTaskPools(conversionPool, syncPool, refreshPool)
 	windows, err := accountRepo.ListQuotaRecoveryWindows(ctx, 100000)
@@ -278,7 +294,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	accountSyncService := accountsyncapp.NewService(logger, accountService, accountService, accountService, modelService)
 	accountSyncService.SetBulkPool(importPool)
 	accountSyncService.UpdateConcurrency(cfg.Batch.ImportConcurrency)
-	egressService := egressapp.NewService(egressRepo, cipher, infraegress.DefaultUserAgent)
+	egressService := egressapp.NewService(egressRepo, cipher, infraegress.DefaultUserAgent, cfg.Provider.Console.UserAgent)
 	egressService.SetClearanceManager(egressManager)
 	clientKeyService := clientkeyapp.NewService(clientKeyRepo, rateLimiter, concurrency, cfg.ClientKeyDefaults.RPMLimit, cfg.ClientKeyDefaults.MaxConcurrent, cipher)
 	auditService := auditapp.NewService(auditRepo, logger, cfg.Audit.BufferSize, cfg.Audit.BatchSize, cfg.Audit.FlushInterval.Value())
@@ -289,6 +305,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	gatewayService.SetLogger(logger)
 	gatewayService.ConfigureMedia(mediaJobRepo, cfg.Provider.Web.MediaConcurrency)
 	gatewayService.ConfigureMediaAssets(mediaService)
+	accountSyncService.SetBuildModelVerifier(gatewayService)
 	quotaRecoveryService := quotarecoveryapp.NewService(logger, quotaQueue, accountService, cfg.Provider.Web.RecoveryBackoffBase.Value(), cfg.Provider.Web.RecoveryBackoffMax.Value())
 	quotaRecoveryService.SetBulkPool(syncPool)
 	inferenceConcurrency := httpmiddleware.NewConcurrencyGate(cfg.Server.MaxConcurrentRequests)
@@ -320,6 +337,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		webAdapter.UpdateConfig(webProviderConfig(next))
 		egressManager.UpdateClearanceConfig(clearanceConfig(next))
 		consoleAdapter.UpdateConfig(consoleProviderConfig(next))
+		egressService.UpdateDefaults(infraegress.DefaultUserAgent, next.Provider.Console.UserAgent)
 		mediaService.UpdateConfig(mediaConfig(next))
 		quotaRecoveryService.UpdateConfig(next.Provider.Web.RecoveryBackoffBase.Value(), next.Provider.Web.RecoveryBackoffMax.Value())
 		accountSyncService.UpdateConcurrency(next.Batch.ImportConcurrency)
@@ -329,7 +347,6 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		gatewayService.UpdateMaxAttempts(next.Routing.MaxAttempts)
 		auditService.UpdateConfig(next.Audit.BatchSize, next.Audit.FlushInterval.Value())
 		clientKeyService.UpdateDefaults(next.ClientKeyDefaults.RPMLimit, next.ClientKeyDefaults.MaxConcurrent)
-		accountService.UpdateAutoCleanConfig(accountAutoCleanConfig(next.Accounts))
 	})
 	updateService := updatecheckapp.NewService(buildinfo.CurrentVersion(), nil)
 
@@ -343,7 +360,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		logger: logger, database: database, server: server,
 		audits: auditService, responses: responseRepo, runtime: runtimeStore,
 		settingsBus: settingsBus, settings: settingsService, gateway: gatewayService, media: mediaService, quotaRecovery: quotaRecoveryService, accounts: accountService, models: modelService, clientKeys: clientKeyService, updates: updateService,
-		accountRepo: accountRepo, modelRepo: modelRepo, providers: providers, web: webAdapter, egress: egressManager, startup: startup,
+		accountRepo: accountRepo, startupAccounts: accountRepo, modelRepo: modelRepo, providers: providers, web: webAdapter, egress: egressManager, startup: startup,
 	}, nil
 }
 
@@ -373,16 +390,8 @@ func clearanceConfig(cfg config.Config) infraegress.ClearanceConfig {
 func consoleProviderConfig(cfg config.Config) consoleprovider.Config {
 	return consoleprovider.Config{
 		BaseURL: cfg.Provider.Console.BaseURL, SessionBaseURL: cfg.Provider.Web.BaseURL,
+		UserAgent:      cfg.Provider.Console.UserAgent,
 		TimeoutSeconds: int(cfg.Provider.Console.ChatTimeout.Value().Seconds()),
-	}
-}
-
-func accountAutoCleanConfig(value config.AccountsConfig) accountapp.AutoCleanConfig {
-	return accountapp.AutoCleanConfig{
-		Enabled:         value.AutoCleanReauthEnabled,
-		Interval:        value.AutoCleanReauthInterval.Value(),
-		MinAge:          value.AutoCleanReauthMinAge.Value(),
-		IncludeDisabled: value.AutoCleanIncludeDisabled,
 	}
 }
 
@@ -470,16 +479,8 @@ func (a *Application) Run(ctx context.Context) error {
 		a.accounts.RunCredentialRefresh(taskCtx)
 		return nil
 	})
-	startBackground("account_auto_clean", func(taskCtx context.Context) error {
-		a.accounts.RunAccountAutoClean(taskCtx)
-		return nil
-	})
 	startBackground("statsig_warmup", func(taskCtx context.Context) error {
 		a.runStatsigWarmup(taskCtx)
-		return nil
-	})
-	startBackground("web_quota_startup_catchup", func(taskCtx context.Context) error {
-		a.runWebQuotaCatchup(taskCtx)
 		return nil
 	})
 	startBackground("model_catalog_startup_catchup", func(taskCtx context.Context) error {
@@ -524,7 +525,6 @@ func (a *Application) Run(ctx context.Context) error {
 			})
 		})
 	}
-	a.queueDueWebQuotaRefresh(runCtx)
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

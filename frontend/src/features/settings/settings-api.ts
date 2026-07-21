@@ -12,7 +12,7 @@ export type SettingsConfigDTO = {
     mediaConcurrency: number; allowNSFW: boolean;
     recoveryBackoffBase: string; recoveryBackoffMax: string;
   };
-  providerConsole: { baseURL: string; chatTimeout: string };
+  providerConsole: { baseURL: string; userAgent: string; chatTimeout: string };
   batch: { importConcurrency: number; conversionConcurrency: number; syncConcurrency: number; refreshConcurrency: number; randomDelay: string };
   media: {
     maxImageBytes: number; maxTotalBytes: number; cleanupThresholdPercent: number;
@@ -22,12 +22,6 @@ export type SettingsConfigDTO = {
   routing: { stickyTTL: string; cooldownBase: string; cooldownMax: string; capacityWait: string; maxAttempts: number; preferFreeBuild: boolean };
   audit: { bufferSize: number; batchSize: number; flushInterval: string };
   clientKeyDefaults: { rpmLimit: number; maxConcurrent: number };
-  accounts: {
-    autoCleanReauthEnabled: boolean;
-    autoCleanReauthInterval: string;
-    autoCleanReauthMinAge: string;
-    autoCleanIncludeDisabled: boolean;
-  };
 };
 
 export type EgressNodeDTO = {
@@ -62,42 +56,14 @@ const settingsConfigValidator = hasShape({
     statsigSignerURL: isString, clearanceMode: isOneOf("manual", "flaresolverr"), flareSolverrURL: isString,
     clearanceTimeout: isString, clearanceRefresh: isString, mediaConcurrency: isNumber, allowNSFW: isBoolean, recoveryBackoffBase: isString, recoveryBackoffMax: isString,
   }),
-  providerConsole: hasShape({ baseURL: isString, chatTimeout: isString }),
+  providerConsole: hasShape({ baseURL: isString, userAgent: isString, chatTimeout: isString }),
   batch: hasShape({ importConcurrency: isNumber, conversionConcurrency: isNumber, syncConcurrency: isNumber, refreshConcurrency: isNumber, randomDelay: isString }),
   media: hasShape({ maxImageBytes: isNumber, maxTotalBytes: isNumber, cleanupThresholdPercent: isNumber, cleanupInterval: isString }),
   frontend: hasShape({ publicApiBaseURL: isString }),
   routing: hasShape({ stickyTTL: isString, cooldownBase: isString, cooldownMax: isString, capacityWait: isString, maxAttempts: isNumber, preferFreeBuild: isBoolean }),
   audit: hasShape({ bufferSize: isNumber, batchSize: isNumber, flushInterval: isString }),
   clientKeyDefaults: hasShape({ rpmLimit: isNumber, maxConcurrent: isNumber }),
-  // 旧后端可无 accounts；decode 后由 withAccountsDefaults 补默认关闭策略。
-  accounts: isOptional(hasShape({
-    autoCleanReauthEnabled: isBoolean,
-    autoCleanReauthInterval: isString,
-    autoCleanReauthMinAge: isString,
-    autoCleanIncludeDisabled: isBoolean,
-  })),
 });
-const defaultAccountsConfig = (): SettingsConfigDTO["accounts"] => ({
-  autoCleanReauthEnabled: false,
-  autoCleanReauthInterval: "10m",
-  autoCleanReauthMinAge: "1h",
-  autoCleanIncludeDisabled: false,
-});
-function withAccountsDefaults(snapshot: SettingsSnapshotDTO): SettingsSnapshotDTO {
-  const accounts = snapshot.config.accounts ?? defaultAccountsConfig();
-  return {
-    ...snapshot,
-    config: {
-      ...snapshot.config,
-      accounts: {
-        autoCleanReauthEnabled: accounts.autoCleanReauthEnabled ?? false,
-        autoCleanReauthInterval: accounts.autoCleanReauthInterval || "10m",
-        autoCleanReauthMinAge: accounts.autoCleanReauthMinAge || "1h",
-        autoCleanIncludeDisabled: accounts.autoCleanIncludeDisabled ?? false,
-      },
-    },
-  };
-}
 const decodeSettingsSnapshotRaw = createObjectDecoder<SettingsSnapshotDTO>("settings", {
   config: settingsConfigValidator,
   recommendedProviderBuild: hasShape({ clientVersion: isString, userAgent: isString }),
@@ -105,7 +71,7 @@ const decodeSettingsSnapshotRaw = createObjectDecoder<SettingsSnapshotDTO>("sett
   revision: isString,
   restartRequired: isArrayOf(isString),
 });
-const decodeSettingsSnapshot = (value: unknown) => withAccountsDefaults(decodeSettingsSnapshotRaw(value));
+const decodeSettingsSnapshot = decodeSettingsSnapshotRaw;
 const egressNodeValidator = hasShape({
   id: isString, name: isString, scope: isOneOf("grok_build", "grok_web", "grok_console", "grok_web_asset"), enabled: isBoolean,
   proxyConfigured: isBoolean, userAgent: isString, cookieConfigured: isBoolean, accountBoundProxy: isBoolean, proxyPool: isBoolean, health: isNumber, failureCount: isNumber,

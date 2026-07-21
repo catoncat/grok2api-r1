@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
@@ -187,5 +188,5 @@ func concurrencySnapshotKey(keys []string) [32]byte {
 }
 
 func accountConcurrencyKey(accountID uint64) string {
-	return repository.AccountConcurrencyKey(accountID)
+	return "account:" + strconv.FormatUint(accountID, 10)
 }

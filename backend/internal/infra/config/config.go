@@ -53,7 +53,6 @@ type Config struct {
 	Routing           RoutingConfig           `yaml:"routing"`
 	Audit             AuditConfig             `yaml:"audit"`
 	ClientKeyDefaults ClientKeyDefaultsConfig `yaml:"clientKeyDefaults"`
-	Accounts          AccountsConfig          `yaml:"-"`
 }
 
 type ServerConfig struct {
@@ -157,9 +156,9 @@ type WebProviderConfig struct {
 }
 
 type ConsoleProviderConfig struct {
-	BaseURL         string   `yaml:"baseURL"`
-	LegacyUserAgent string   `yaml:"userAgent"` // Deprecated: 仅用于兼容旧配置文件，不参与请求。
-	ChatTimeout     Duration `yaml:"chatTimeout"`
+	BaseURL     string   `yaml:"baseURL"`
+	UserAgent   string   `yaml:"userAgent"`
+	ChatTimeout Duration `yaml:"chatTimeout"`
 }
 
 // BatchConfig 定义可热加载的账号批量任务并发上限。
@@ -216,14 +215,6 @@ type AuditConfig struct {
 type ClientKeyDefaultsConfig struct {
 	RPMLimit      int `yaml:"rpmLimit"`
 	MaxConcurrent int `yaml:"maxConcurrent"`
-}
-
-// AccountsConfig 定义可热加载的账号池维护策略；默认全部关闭。
-type AccountsConfig struct {
-	AutoCleanReauthEnabled   bool
-	AutoCleanReauthInterval  Duration
-	AutoCleanReauthMinAge    Duration
-	AutoCleanIncludeDisabled bool
 }
 
 type Secrets struct {
@@ -481,6 +472,9 @@ func (c Config) Validate() error {
 	if err != nil || consoleURL.Scheme != "https" || consoleURL.Host == "" || consoleURL.User != nil {
 		return errors.New("provider.console.baseURL 必须是无凭据的 HTTPS URL")
 	}
+	if userAgent := strings.TrimSpace(c.Provider.Console.UserAgent); len(userAgent) < 1 || len(userAgent) > 512 {
+		return errors.New("provider.console.userAgent 长度必须在 1 到 512 个字符之间")
+	}
 	if c.Provider.Console.ChatTimeout.Value() < 5*time.Second || c.Provider.Console.ChatTimeout.Value() > 30*time.Minute {
 		return errors.New("provider.console.chatTimeout 必须在 5 秒到 30 分钟之间")
 	}
@@ -510,12 +504,6 @@ func (c Config) Validate() error {
 	}
 	if c.ClientKeyDefaults.RPMLimit < 1 || c.ClientKeyDefaults.RPMLimit > clientkeydomain.MaxRPMLimit || c.ClientKeyDefaults.MaxConcurrent < 1 || c.ClientKeyDefaults.MaxConcurrent > clientkeydomain.MaxConcurrent {
 		return errors.New("clientKeyDefaults 超出允许范围")
-	}
-	if c.Accounts.AutoCleanReauthInterval.Value() < time.Minute || c.Accounts.AutoCleanReauthInterval.Value() > time.Hour {
-		return errors.New("accounts.autoCleanReauthInterval 必须在 1 分钟到 1 小时之间")
-	}
-	if c.Accounts.AutoCleanReauthMinAge.Value() < time.Minute || c.Accounts.AutoCleanReauthMinAge.Value() > 30*24*time.Hour {
-		return errors.New("accounts.autoCleanReauthMinAge 必须在 1 分钟到 30 天之间")
 	}
 	return nil
 }
@@ -587,7 +575,7 @@ func defaultConfig() Config {
 				MediaConcurrency: 4, RecoveryBackoffBase: Duration(30 * time.Second),
 				RecoveryBackoffMax: Duration(30 * time.Minute),
 			},
-			Console: ConsoleProviderConfig{BaseURL: "https://console.x.ai", ChatTimeout: Duration(5 * time.Minute)},
+			Console: ConsoleProviderConfig{BaseURL: "https://console.x.ai", UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36", ChatTimeout: Duration(5 * time.Minute)},
 		},
 		Batch: BatchConfig{
 			ImportConcurrency: 25, ConversionConcurrency: 25, SyncConcurrency: 25,
@@ -611,12 +599,6 @@ func defaultConfig() Config {
 		},
 		Audit:             AuditConfig{BufferSize: 16384, BatchSize: 256, FlushInterval: Duration(250 * time.Millisecond)},
 		ClientKeyDefaults: ClientKeyDefaultsConfig{RPMLimit: clientkeydomain.DefaultRPMLimit, MaxConcurrent: clientkeydomain.DefaultMaxConcurrent},
-		Accounts: AccountsConfig{
-			AutoCleanReauthEnabled:   false,
-			AutoCleanReauthInterval:  Duration(10 * time.Minute),
-			AutoCleanReauthMinAge:    Duration(time.Hour),
-			AutoCleanIncludeDisabled: false,
-		},
 	}
 }
 

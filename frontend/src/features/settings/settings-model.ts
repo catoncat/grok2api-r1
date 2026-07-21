@@ -81,6 +81,7 @@ export const settingsSchema = z.object({
   }),
   providerConsole: z.object({
     baseURL: z.url().refine((value) => value.startsWith("https://")),
+    userAgent: z.string().trim().min(1).max(512),
     chatTimeout: consoleChatDuration,
   }),
   batch: z.object({
@@ -110,18 +111,6 @@ export const settingsSchema = z.object({
   audit: z.object({ bufferSize: positiveInteger.max(262_144), batchSize: positiveInteger.max(4_096), flushInterval: auditFlushDuration })
     .refine((value) => value.batchSize <= value.bufferSize, { path: ["batchSize"] }),
   clientKeyDefaults: z.object({ rpmLimit: positiveInteger.max(100_000), maxConcurrent: positiveInteger.max(1_024) }),
-  accounts: z.object({
-    autoCleanReauthEnabled: z.boolean(),
-    autoCleanReauthInterval: durationSchema.refine((value) => {
-      const seconds = durationSeconds(value);
-      return seconds >= 60 && seconds <= 3_600;
-    }),
-    autoCleanReauthMinAge: durationSchema.refine((value) => {
-      const seconds = durationSeconds(value);
-      return seconds >= 60 && seconds <= 30 * 86_400;
-    }),
-    autoCleanIncludeDisabled: z.boolean(),
-  }),
 });
 
 export type SettingsForm = z.infer<typeof settingsSchema>;
@@ -155,12 +144,6 @@ export function toSettingsForm(config: SettingsConfigDTO): SettingsForm {
     },
     audit: { bufferSize: config.audit.bufferSize, batchSize: config.audit.batchSize, flushInterval: parseDuration(config.audit.flushInterval) },
     clientKeyDefaults: config.clientKeyDefaults,
-    accounts: {
-      autoCleanReauthEnabled: config.accounts.autoCleanReauthEnabled,
-      autoCleanReauthInterval: parseDuration(config.accounts.autoCleanReauthInterval),
-      autoCleanReauthMinAge: parseDuration(config.accounts.autoCleanReauthMinAge),
-      autoCleanIncludeDisabled: config.accounts.autoCleanIncludeDisabled,
-    },
   };
 }
 
@@ -192,12 +175,6 @@ export function toSettingsDTO(config: SettingsForm): SettingsConfigDTO {
     },
     audit: { bufferSize: config.audit.bufferSize, batchSize: config.audit.batchSize, flushInterval: formatDuration(config.audit.flushInterval) },
     clientKeyDefaults: config.clientKeyDefaults,
-    accounts: {
-      autoCleanReauthEnabled: config.accounts.autoCleanReauthEnabled,
-      autoCleanReauthInterval: formatDuration(config.accounts.autoCleanReauthInterval),
-      autoCleanReauthMinAge: formatDuration(config.accounts.autoCleanReauthMinAge),
-      autoCleanIncludeDisabled: config.accounts.autoCleanIncludeDisabled,
-    },
   };
 }
 

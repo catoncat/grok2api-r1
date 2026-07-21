@@ -56,7 +56,6 @@ Grok2API 是一个以 Go 为核心、内置 React 管理端的 Grok API 网关�
 - **账号关联**：以 Web 为中心展示 Build/Console 弱关联，并可共享稳定出口身份；运行状态仍彼此独立
 - **运行基础设施**：SQLite/PostgreSQL、Memory/Redis、HTTP/SOCKS5/Resin 出口
 - **管理后台**：Dashboard、账号、模型、密钥、图库、视频库、请求审计、运行设置和版本检查
-- **可选账号自动清理**（默认关闭）：运行设置可按间隔硬删除已标记 `reauthRequired` 且 `reauth_marked_at` 超过最短保留时长的账号。不会选中纯冷却账号，也不会打断仍可 drain 的永久 refresh 账号；仍有推理租约或排队中/进行中视频任务的账号会被跳过。共享运行态下使用分布式维护锁避免多实例重复执行，每次 tick 采用有限删除预算。启用后与进程启动后的首次扫描均等待一个间隔，且只有清理策略实际变化时才重排下一次扫描。
 
 ## 架构设计
 
@@ -339,7 +338,7 @@ docker compose --profile flaresolverr up -d
 podman compose --profile flaresolverr up -d
 ```
 
-随后在管理端打开 **运行设置 → 媒体与网络 → Clearance**，选择 `FlareSolverr`，并将服务地址设为 `http://flaresolverr:8191`。FlareSolverr 不会暴露到宿主机；每个 Web 或 Console 出口节点均使用自身代理获取匹配的 Cookie 与 User-Agent。
+随后在管理端打开 **运行设置 -> 媒体与网络 -> Clearance**，选择 `FlareSolverr`，并将服务地址设为 `http://flaresolverr:8191`。FlareSolverr 不会暴露到宿主机；每个 Web 或 WebAsset 出口节点均使用自身代理获取匹配的 Cookie 与 User-Agent。Console 保持独立手工身份，不参与 Web clearance 生命周期。
 
 ### Resin 粘性代理
 

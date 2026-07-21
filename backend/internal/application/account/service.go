@@ -134,7 +134,19 @@ const (
 	CleanupStatusCooldown       CleanupStatus = "cooldown"
 	CleanupStatusDisabled       CleanupStatus = "disabled"
 	CleanupStatusReauthRequired CleanupStatus = "reauthRequired"
+	maxCleanupAccounts                        = 500
 )
+
+// CleanupResult 汇总一次有界清理预检/执行；Protected 是有模型路由绑定、
+// 不可删除的账号数，DryRun 为 true 时不发生任何删除。
+type CleanupResult struct {
+	Matched   int
+	Protected int
+	Eligible  int
+	Skipped   int
+	Deleted   int
+	DryRun    bool
+}
 
 type DeviceStartResult struct {
 	SessionID               string
@@ -256,7 +268,6 @@ type Service struct {
 	deviceSessions        repository.DeviceSessionRepository
 	sticky                repository.StickySessionRepository
 	refreshLock           repository.DistributedLock
-	concurrency           repository.ConcurrencyLimiter
 	quotaQueue            repository.QuotaRecoveryQueue
 	providers             *provider.Registry
 	cipher                *security.Cipher
@@ -273,10 +284,6 @@ type Service struct {
 	syncPool              *batch.Pool
 	refreshPool           *batch.Pool
 	credentialRefreshWake chan struct{}
-	autoCleanMu           sync.RWMutex
-	autoClean             AutoCleanConfig
-	autoCleanRevision     uint64
-	autoCleanWake         chan struct{}
 	buildBotFlagCache     *resultcache.Cache[string, []uint64]
 	logger                *slog.Logger
 	now                   func() time.Time
@@ -286,11 +293,6 @@ func (s *Service) SetQuotaRecoveryQueue(queue repository.QuotaRecoveryQueue) {
 	s.quotaQueue = queue
 }
 
-// SetConcurrencyLimiter 让账号维护任务读取与推理路由相同的活动租约。
-func (s *Service) SetConcurrencyLimiter(value repository.ConcurrencyLimiter) {
-	s.concurrency = value
-}
-
 func NewService(accounts repository.AccountRepository, audits repository.AuditRepository, deviceSessions repository.DeviceSessionRepository, sticky repository.StickySessionRepository, providers *provider.Registry, cipher *security.Cipher, refreshLock repository.DistributedLock) *Service {
 	return &Service{
 		accounts: accounts, audits: audits, deviceSessions: deviceSessions, sticky: sticky,
@@ -298,12 +300,8 @@ func NewService(accounts repository.AccountRepository, audits repository.AuditRe
 		lastRefreshAt: make(map[uint64]time.Time), quotaRefreshes: make(map[string]*webQuotaRefreshState),
 		quotaRefreshQueue:     make(chan webQuotaRefreshRequest, webQuotaRefreshQueueSize),
 		credentialRefreshWake: make(chan struct{}, 1),
-		autoClean: AutoCleanConfig{
-			Enabled: false, Interval: 10 * time.Minute, MinAge: time.Hour, IncludeDisabled: false,
-		},
-		autoCleanWake:     make(chan struct{}, 1),
-		buildBotFlagCache: resultcache.New[string, []uint64](1, buildBotFlagCacheTTL),
-		conversionPool:    batch.NewPool(25), syncPool: batch.NewPool(25), refreshPool: batch.NewPool(25), logger: slog.Default(),
+		buildBotFlagCache:     resultcache.New[string, []uint64](1, buildBotFlagCacheTTL),
+		conversionPool:        batch.NewPool(25), syncPool: batch.NewPool(25), refreshPool: batch.NewPool(25), logger: slog.Default(),
 		now: func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -473,7 +471,7 @@ func (s *Service) BatchUpdate(ctx context.Context, ids []uint64, input UpdateInp
 	if err != nil {
 		return 0, err
 	}
-	if input.Enabled != nil && !*input.Enabled {
+	if input.Enabled != nil && !*input.Enabled && s.sticky != nil {
 		for _, id := range ids {
 			_ = s.sticky.DeleteByAccount(ctx, id)
 		}
@@ -488,7 +486,9 @@ func (s *Service) BatchDelete(ctx context.Context, ids []uint64) (int64, error) 
 		return 0, err
 	}
 	for _, id := range ids {
-		_ = s.sticky.DeleteByAccount(ctx, id)
+		if s.sticky != nil {
+			_ = s.sticky.DeleteByAccount(ctx, id)
+		}
 		s.clearRefreshState(id)
 	}
 	deleted, err := s.accounts.DeleteMany(ctx, ids)
@@ -515,52 +515,55 @@ func (s *Service) AccountsBelongToProvider(ctx context.Context, ids []uint64, pr
 	return count == int64(len(values)), nil
 }
 
-// CleanupAccounts 按管理端状态清理指定 Provider 账号；正常、待重置和检测中的账号不在清理范围内。
-func (s *Service) CleanupAccounts(ctx context.Context, providerValue accountdomain.Provider, statuses []CleanupStatus) (int64, error) {
+// CleanupAccounts 按明确状态、有限数量清理账号；调用方必须显式关闭 dry-run 才会删除。
+func (s *Service) CleanupAccounts(ctx context.Context, providerValue accountdomain.Provider, statuses []CleanupStatus, limit int, dryRun bool) (CleanupResult, error) {
 	if !providerValue.IsValid() {
-		return 0, invalidInput("账号来源无效")
+		return CleanupResult{}, invalidInput("账号来源无效")
+	}
+	if limit < 1 || limit > maxCleanupAccounts {
+		return CleanupResult{}, invalidInput(fmt.Sprintf("单次最多处理 %d 个账号", maxCleanupAccounts))
 	}
 	selected := make(map[CleanupStatus]struct{}, len(statuses))
 	for _, status := range statuses {
 		switch status {
-		case CleanupStatusCooldown, CleanupStatusDisabled, CleanupStatusReauthRequired:
+		case CleanupStatusDisabled, CleanupStatusReauthRequired, CleanupStatusCooldown:
 			selected[status] = struct{}{}
 		default:
-			return 0, invalidInput("账号清理状态无效")
+			return CleanupResult{}, invalidInput("账号清理状态无效")
 		}
 	}
 	if len(selected) == 0 {
-		return 0, invalidInput("至少选择一种账号状态")
+		return CleanupResult{}, invalidInput("至少选择一种账号状态")
 	}
 
-	const cleanupBatchSize = 500
-	now := s.now()
-	var deleted int64
+	result := CleanupResult{DryRun: dryRun}
 	for _, status := range []CleanupStatus{CleanupStatusDisabled, CleanupStatusReauthRequired, CleanupStatusCooldown} {
-		if _, ok := selected[status]; !ok {
+		if _, ok := selected[status]; !ok || result.Matched >= limit {
 			continue
 		}
-		for {
-			ids, candidates, err := s.accounts.DeleteAccountStatusBatch(ctx, providerValue, string(status), now, cleanupBatchSize)
-			if err != nil {
-				return deleted, mapRepositoryError(err)
-			}
-			for _, id := range ids {
-				if s.sticky != nil {
-					_ = s.sticky.DeleteByAccount(ctx, id)
-				}
-				s.clearRefreshState(id)
-			}
-			deleted += int64(len(ids))
-			if candidates < cleanupBatchSize {
-				break
-			}
+		batch, err := s.accounts.CleanupAccountStatusBatch(ctx, providerValue, string(status), s.now(), limit-result.Matched, dryRun)
+		if err != nil {
+			return result, mapRepositoryError(err)
 		}
+		result.Matched += batch.Matched
+		result.Protected += batch.Protected
+		result.Eligible += batch.Eligible
+		result.Skipped += batch.Skipped
+		if dryRun {
+			continue
+		}
+		for _, id := range batch.DeletedIDs {
+			if s.sticky != nil {
+				_ = s.sticky.DeleteByAccount(ctx, id)
+			}
+			s.clearRefreshState(id)
+		}
+		result.Deleted += len(batch.DeletedIDs)
 	}
-	if deleted > 0 {
+	if result.Deleted > 0 {
 		s.invalidateBuildBotFlagCache()
 	}
-	return deleted, nil
+	return result, nil
 }
 
 func (s *Service) Get(ctx context.Context, id uint64) (View, error) {
@@ -1054,6 +1057,9 @@ func (s *Service) syncWebCredentialsToConsole(ctx context.Context, values []acco
 		seed.Provider = accountdomain.ProviderConsole
 		seed.AuthType = accountdomain.AuthTypeSSO
 		seed.Name = webConsoleAccountName(value.Name, seed.Name)
+		// Web→Console companion 继承 Team 归因（并存兼容 Q1）；
+		// email/user_id 身份由上游 identity sync 维护。
+		seed.TeamID = value.TeamID
 		if strings.TrimSpace(value.EncryptedCloudflareCookie) != "" {
 			cookies, decryptErr := s.cipher.Decrypt(value.EncryptedCloudflareCookie)
 			if decryptErr != nil {
@@ -1943,6 +1949,16 @@ func (s *Service) HasQuotaWindows(ctx context.Context, id uint64) (bool, error) 
 	return s.accounts.HasQuotaWindows(ctx, id)
 }
 
+// ObserveTeamID remembers team-scoped rate-limit identity learned from an
+// upstream response. It does not alter the account's stable import identity.
+func (s *Service) ObserveTeamID(ctx context.Context, id uint64, teamID string) error {
+	teamID = strings.TrimSpace(teamID)
+	if id == 0 || teamID == "" || len(teamID) > 255 {
+		return fmt.Errorf("上游 Team ID 无效")
+	}
+	return s.accounts.UpdateTeamID(ctx, id, teamID)
+}
+
 func (s *Service) DecrementQuota(ctx context.Context, id uint64, mode string, amount int) (bool, error) {
 	if amount <= 0 {
 		amount = 1
@@ -2374,7 +2390,7 @@ func (s *Service) syncAllQuotasWithProgress(ctx context.Context, providerValue a
 	})
 }
 
-// SyncWebQuotaAccounts 同步指定 Web 账号集合，供启动追赶任务复用共享并发池。
+// SyncWebQuotaAccounts 同步显式指定的 Web 账号集合，供有界管理批次复用共享并发池。
 func (s *Service) SyncWebQuotaAccounts(ctx context.Context, ids []uint64) (int, int, error) {
 	return s.runAccountBatch(ctx, "web_quota_startup_catchup", ids, s.syncPool, nil, func(workCtx context.Context, id uint64) error {
 		_, err := s.RefreshWebQuota(workCtx, id)

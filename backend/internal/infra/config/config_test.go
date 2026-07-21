@@ -51,12 +51,6 @@ bootstrapAdmin:
 	if cfg.Routing.PreferFreeBuild {
 		t.Fatal("preferFreeBuild should retain its false default when omitted from YAML")
 	}
-	if cfg.Accounts.AutoCleanReauthEnabled || cfg.Accounts.AutoCleanIncludeDisabled {
-		t.Fatal("accounts auto-clean flags should default to false")
-	}
-	if cfg.Accounts.AutoCleanReauthInterval.Value() != 10*time.Minute || cfg.Accounts.AutoCleanReauthMinAge.Value() != time.Hour {
-		t.Fatalf("accounts auto-clean defaults = %#v", cfg.Accounts)
-	}
 	if !cfg.Routing.ReasoningReplayEnabled || cfg.Routing.ReasoningReplayTTL.Value() != time.Hour || cfg.Routing.ReasoningReplayMaxEntries != 10240 {
 		t.Fatalf("reasoning replay defaults = %#v", cfg.Routing)
 	}
@@ -92,7 +86,7 @@ func TestDefaultGrokBuildClientVersionMatchesLocalBaseline(t *testing.T) {
 
 func TestDefaultConsoleProviderConfig(t *testing.T) {
 	console := defaultConfig().Provider.Console
-	if console.BaseURL != "https://console.x.ai" || console.LegacyUserAgent != "" || console.ChatTimeout.Value() != 5*time.Minute {
+	if console.BaseURL != "https://console.x.ai" || console.UserAgent == "" || console.ChatTimeout.Value() != 5*time.Minute {
 		t.Fatalf("console defaults = %#v", console)
 	}
 }
@@ -113,8 +107,8 @@ secrets:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Provider.Console.LegacyUserAgent != "legacy-console-agent" {
-		t.Fatalf("legacy userAgent = %q", cfg.Provider.Console.LegacyUserAgent)
+	if cfg.Provider.Console.UserAgent != "legacy-console-agent" {
+		t.Fatalf("console userAgent = %q", cfg.Provider.Console.UserAgent)
 	}
 }
 
@@ -187,6 +181,7 @@ func TestValidateRejectsUnsafeRuntimeLimits(t *testing.T) {
 		"batch limit":  func(cfg *Config) { cfg.Batch.SyncConcurrency = 51 },
 		"batch jitter": func(cfg *Config) { cfg.Batch.RandomDelay = Duration(6 * time.Second) },
 		"console url":  func(cfg *Config) { cfg.Provider.Console.BaseURL = "http://console.x.ai" },
+		"console ua":   func(cfg *Config) { cfg.Provider.Console.UserAgent = "" },
 		"console timeout": func(cfg *Config) {
 			cfg.Provider.Console.ChatTimeout = Duration(time.Second)
 		},

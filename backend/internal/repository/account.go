@@ -15,6 +15,17 @@ type AccountUpdates struct {
 	MinimumRemaining *float64
 }
 
+// AccountCleanupBatch 汇总一个有界状态批次；Matched 包含受模型路由绑定保护的候选，
+// Protected 只统计 model_route_accounts 已引用、因此不可删除的账号。Eligible 是预检时
+// 可删除的账号，Skipped 是执行前状态复检或最终绑定门禁阻止删除的账号。
+type AccountCleanupBatch struct {
+	Matched    int
+	Protected  int
+	Eligible   int
+	Skipped    int
+	DeletedIDs []uint64
+}
+
 type AccountUpsertResult struct {
 	ID      uint64
 	Created bool
@@ -37,7 +48,7 @@ type AccountRepository interface {
 	ListMissingConsoleSyncAccounts(ctx context.Context, ids []uint64) ([]account.Credential, error)
 	// ListMissingConsoleSyncBatch 以 ID 游标取缺少 Console 账号的 Web 账号；total/skipped 仅在 afterID 为 0 时返回。
 	ListMissingConsoleSyncBatch(ctx context.Context, afterID uint64, limit int) ([]account.Credential, int64, int64, error)
-	HasActive(ctx context.Context, provider account.Provider) (bool, error)
+	HasActive(ctx context.Context, provider account.Provider, upstreamModel, quotaMode string) (bool, error)
 	ListRoutingCandidates(ctx context.Context, provider account.Provider, upstreamModel, quotaMode string) ([]account.RoutingCandidate, error)
 	Get(ctx context.Context, id uint64) (account.Credential, error)
 	LinkWebToBuild(ctx context.Context, webAccountID, buildAccountID uint64) error
@@ -48,18 +59,16 @@ type AccountRepository interface {
 	UpdateMany(ctx context.Context, ids []uint64, updates AccountUpdates) (int64, error)
 	Delete(ctx context.Context, id uint64) error
 	DeleteMany(ctx context.Context, ids []uint64) (int64, error)
-	// ListAutoCleanReauthCandidates 以 ID 游标列出达到清理年龄的 reauthRequired 账号。
-	ListAutoCleanReauthCandidates(ctx context.Context, markedBefore time.Time, includeDisabled bool, afterID uint64, limit int) ([]uint64, error)
-	// DeleteAutoCleanReauthCandidates 在事务内重新校验状态与年龄并跳过活动视频任务，返回实际删除 ID。
-	DeleteAutoCleanReauthCandidates(ctx context.Context, markedBefore time.Time, includeDisabled bool, candidateIDs []uint64) ([]uint64, error)
-	// DeleteAccountStatusBatch 删除当前仍匹配指定管理端状态的一批账号，并返回实际删除的 ID。
-	DeleteAccountStatusBatch(ctx context.Context, provider account.Provider, status string, now time.Time, limit int) ([]uint64, int, error)
+	// CleanupAccountStatusBatch 预检并（可选）删除一个有界状态批次；受模型路由
+	// 绑定保护的账号计入 Protected 且绝不删除，dryRun 时不发生任何写入。
+	CleanupAccountStatusBatch(ctx context.Context, provider account.Provider, status string, now time.Time, limit int, dryRun bool) (AccountCleanupBatch, error)
 	UpdateTokens(ctx context.Context, id uint64, accessToken, refreshToken string, expiresAt time.Time) (account.Credential, error)
 	BackfillCredentialRefreshSchedules(ctx context.Context, now time.Time, limit int) (int, error)
 	ListCriticalCredentialRefreshIDs(ctx context.Context, now, expiresBefore time.Time, limit int) ([]uint64, error)
 	ListDueCredentialRefreshIDs(ctx context.Context, now time.Time, limit int) ([]uint64, error)
 	NextCredentialRefreshDueAt(ctx context.Context) (*time.Time, error)
 	UpdateCredentialRefreshFailure(ctx context.Context, id uint64, failureCount int, retryAt time.Time, errorCode string, permanent bool) error
+	UpdateTeamID(ctx context.Context, id uint64, teamID string) error
 	UpdateObservedModel(ctx context.Context, id uint64, model string, observedAt time.Time) error
 	UpdateHealth(ctx context.Context, id uint64, failureCount int, cooldownUntil *time.Time, lastError string, success bool) error
 	// MarkBuildAPIFallback 幂等写入 Build 账号的 XAI 推理回退标记；非 Build 账号返回错误。
