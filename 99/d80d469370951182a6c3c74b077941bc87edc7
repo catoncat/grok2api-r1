@@ -1,0 +1,19 @@
+backend/internal/transport/http/inference/handler_test.go
+  s_8cefdaccf172d2::t_d924f93d349e33 547-569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "99d80d469370951182a6c3c74b077941bc87edc7",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
