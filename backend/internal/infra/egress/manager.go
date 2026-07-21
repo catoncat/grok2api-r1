@@ -1,11 +1,13 @@
 package egress
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -28,6 +30,10 @@ const clientCacheIdleTTL = 30 * time.Minute
 const clientCacheCleanupInterval = time.Minute
 const maxCachedClients = 4096
 
+// affinityHealthFloor 与 cf-pool 的 ready 门槛一致：低于该水位的节点不参与
+// affinity 选路，除非整个安全集合都低于水位（ADR-002）。
+const affinityHealthFloor = 0.5
+
 type Lease struct {
 	NodeID    uint64
 	NodeName  string
@@ -38,6 +44,7 @@ type Lease struct {
 	client    requestClient
 	browser   *browserClient
 	sticky    bool
+	nodeScope domain.Scope
 	release   func()
 }
 
@@ -62,6 +69,7 @@ func (l *Lease) Release() {
 type Manager struct {
 	repository        repository.EgressRepository
 	cipher            *security.Cipher
+	feedbackMu        sync.Mutex
 	mu                sync.Mutex
 	clients           map[clientCacheKey]cachedClient
 	inflight          map[uint64]int
@@ -92,13 +100,23 @@ func NewManager(repository repository.EgressRepository, cipher *security.Cipher)
 }
 
 func (m *Manager) Acquire(ctx context.Context, scope domain.Scope, affinity string) (*Lease, error) {
-	lease, _, err := m.acquire(ctx, scope, affinity, true, "")
+	lease, _, err := m.acquire(ctx, scope, affinity, true, "", 0)
 	return lease, err
 }
 
 // AcquireCredential binds the outbound proxy identity to one persisted
 // Provider credential. Resin templates use this identity as their Account.
 func (m *Manager) AcquireCredential(ctx context.Context, scope domain.Scope, credential accountdomain.Credential) (*Lease, error) {
+	return m.acquireCredential(ctx, scope, credential, 0)
+}
+
+// AcquireCredentialExcluding retries a credential on a different Egress node.
+// It is reserved for a node-scoped anti-bot signal, such as Grok /index 403.
+func (m *Manager) AcquireCredentialExcluding(ctx context.Context, scope domain.Scope, credential accountdomain.Credential, excludedNodeID uint64) (*Lease, error) {
+	return m.acquireCredential(ctx, scope, credential, excludedNodeID)
+}
+
+func (m *Manager) acquireCredential(ctx context.Context, scope domain.Scope, credential accountdomain.Credential, excludedNodeID uint64) (*Lease, error) {
 	identity := strings.TrimSpace(credential.EgressIdentity)
 	if identity == "" {
 		identity = string(credential.Provider) + "_" + strconv.FormatUint(credential.ID, 10)
@@ -124,39 +142,47 @@ func (m *Manager) AcquireCredential(ctx context.Context, scope domain.Scope, cre
 		identity = "sso_" + security.HashToken(token)[:32]
 	}
 	ctx = WithAccountIdentity(ctx, identity)
-	lease, _, err := m.acquire(ctx, scope, strconv.FormatUint(credential.ID, 10), true, credentialCookies)
+	lease, _, err := m.acquire(ctx, scope, strconv.FormatUint(credential.ID, 10), true, credentialCookies, excludedNodeID)
 	return lease, err
 }
 
 func (m *Manager) AcquireIfConfigured(ctx context.Context, scope domain.Scope, affinity string) (*Lease, bool, error) {
-	return m.acquire(ctx, scope, affinity, false, "")
+	return m.acquire(ctx, scope, affinity, false, "", 0)
 }
 
-func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity string, allowDirect bool, credentialCookies string) (*Lease, bool, error) {
+func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity string, allowDirect bool, credentialCookies string, excludedNodeID uint64) (*Lease, bool, error) {
 	now := time.Now().UTC()
 	configured := false
-	var available []domain.Node
+	var selected domain.Node
+	selectedOK := false
 	for _, candidateScope := range fallbackScopes(scope) {
 		nodes, err := m.listNodes(ctx, candidateScope, now)
 		if err != nil {
 			return nil, false, err
 		}
+		// 任何已配置节点（含 disabled/cooling）都视为该 scope 已配置出口，
+		// 存在配置时禁止静默回退 direct（回退上游 4c918c8 的语义）。
+		configured = configured || len(nodes) > 0
 		candidateAvailable := make([]domain.Node, 0, len(nodes))
 		for _, node := range nodes {
-			if !node.Enabled {
+			if excludedNodeID != 0 && node.ID == excludedNodeID {
 				continue
 			}
-			configured = true
-			if node.CooldownUntil == nil || !now.Before(*node.CooldownUntil) {
+			// Console 只能复用 Web 的 Resin sticky 节点；静态 Web 节点会把
+			// Console 反馈打到图片通道的共享健康上。
+			if scope == domain.ScopeConsole && candidateScope == domain.ScopeWeb && !m.isStickyProxyNode(node) {
+				continue
+			}
+			if node.Enabled && (node.CooldownUntil == nil || !now.Before(*node.CooldownUntil)) {
 				candidateAvailable = append(candidateAvailable, node)
 			}
 		}
-		if len(candidateAvailable) > 0 {
-			available = candidateAvailable
+		sort.SliceStable(candidateAvailable, func(i, j int) bool { return candidateAvailable[i].ID < candidateAvailable[j].ID })
+		if selected, selectedOK = m.selectNode(candidateAvailable, affinity); selectedOK {
 			break
 		}
 	}
-	if len(available) == 0 {
+	if !selectedOK {
 		if configured {
 			return nil, false, fmt.Errorf("当前没有可用的 %s 出口节点", scope)
 		}
@@ -164,10 +190,8 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 			recordSelection(ctx, Selection{NodeName: "direct", Scope: scope})
 			return nil, false, nil
 		}
-		available = []domain.Node{{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}}
+		selected = domain.Node{ID: 0, Name: "direct", Scope: scope, Enabled: true, Health: 1}
 	}
-	sort.SliceStable(available, func(i, j int) bool { return available[i].ID < available[j].ID })
-	selected := m.selectNode(available, affinity)
 	proxyURL, err := m.cipher.Decrypt(selected.EncryptedProxyURL)
 	if err != nil {
 		return nil, false, err
@@ -214,7 +238,7 @@ func (m *Manager) acquire(ctx context.Context, scope domain.Scope, affinity stri
 	m.mu.Unlock()
 	recordSelection(ctx, Selection{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, Proxied: proxyURL != ""})
 	var once sync.Once
-	return &Lease{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, ProxyURL: proxyURL, UserAgent: userAgent, CFCookies: cookies, client: client.client, browser: client.browser, sticky: sticky, release: func() {
+	return &Lease{NodeID: selected.ID, NodeName: selected.Name, Scope: scope, ProxyURL: proxyURL, UserAgent: userAgent, CFCookies: cookies, client: client.client, browser: client.browser, sticky: sticky, nodeScope: selected.Scope, release: func() {
 		once.Do(func() {
 			m.mu.Lock()
 			m.inflight[selected.ID]--
@@ -299,37 +323,72 @@ func fallbackScopes(scope domain.Scope) []domain.Scope {
 		return []domain.Scope{domain.ScopeWebAsset, domain.ScopeWeb}
 	}
 	if scope == domain.ScopeConsole {
-		// Console uses the same browser/clearance surface as Grok Web.  A
-		// dedicated Console node is preferred, but a Web node is a safe and
-		// expected fallback for deployments that configure one shared pool.
+		// Resin 账号模板可安全复用 Web 节点；静态 Web sticky 会在 acquire 中
+		// 被过滤，避免 Console 反馈污染图片通道。
 		return []domain.Scope{domain.ScopeConsole, domain.ScopeWeb}
 	}
 	return []domain.Scope{scope}
 }
 
-func (m *Manager) selectNode(nodes []domain.Node, affinity string) domain.Node {
-	if affinity != "" {
-		digest := sha256.Sum256([]byte(affinity))
-		selected := nodes[int(binary.BigEndian.Uint64(digest[:8])%uint64(len(nodes)))]
-		if selected.Health >= 0.8 || len(nodes) == 1 {
-			return selected
+// selectNode 先在安全集合内选路：lastError 含 confirmed anti-bot 的节点被硬熔断。
+// 安全集合为空时返回 false，由调用方 fail-closed，不得回到已确认的反爬节点。
+func (m *Manager) selectNode(nodes []domain.Node, affinity string) (domain.Node, bool) {
+	safe := make([]domain.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if !strings.Contains(strings.ToLower(node.LastError), "anti-bot") {
+			safe = append(safe, node)
 		}
-		for _, node := range nodes {
-			if node.Health > selected.Health {
-				selected = node
+	}
+	if len(safe) == 0 {
+		return domain.Node{}, false
+	}
+	if affinity != "" {
+		candidates := make([]domain.Node, 0, len(safe))
+		for _, node := range safe {
+			if node.Health >= affinityHealthFloor {
+				candidates = append(candidates, node)
 			}
 		}
-		return selected
+		if len(candidates) == 0 {
+			candidates = safe
+		}
+		return rendezvousNode(candidates, affinity), true
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	best := nodes[0]
-	for _, node := range nodes[1:] {
+	best := safe[0]
+	for _, node := range safe[1:] {
 		if m.inflight[node.ID] < m.inflight[best.ID] || (m.inflight[node.ID] == m.inflight[best.ID] && node.Health > best.Health) {
 			best = node
 		}
 	}
-	return best
+	return best, true
+}
+
+// rendezvousNode 用 rendezvous hashing 让节点集合变化时只重映射必要账号。
+func rendezvousNode(nodes []domain.Node, affinity string) domain.Node {
+	selected := nodes[0]
+	best := rendezvousScore(affinity, selected.ID)
+	for _, node := range nodes[1:] {
+		score := rendezvousScore(affinity, node.ID)
+		if bytes.Compare(score[:], best[:]) > 0 {
+			selected = node
+			best = score
+		}
+	}
+	return selected
+}
+
+func rendezvousScore(affinity string, nodeID uint64) [sha256.Size]byte {
+	var encodedNodeID [8]byte
+	binary.BigEndian.PutUint64(encodedNodeID[:], nodeID)
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(affinity))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(encodedNodeID[:])
+	var score [sha256.Size]byte
+	copy(score[:], hash.Sum(nil))
+	return score
 }
 
 func (m *Manager) clientFor(id uint64, scope domain.Scope, proxyURL, userAgent, cookies string, sticky bool) (cachedClient, error) {
@@ -427,6 +486,23 @@ func (m *Manager) Feedback(ctx context.Context, nodeID uint64, status int, trans
 	m.FeedbackForScope(ctx, domain.ScopeWeb, nodeID, status, transportErr)
 }
 
+// FeedbackForLease 按 lease 归属反馈：fallback lease 拥有自己的客户端，但不拥有
+// 源节点的共享健康。Console 失败绝不能冷却 Web Resin 舰队。
+func (m *Manager) FeedbackForLease(ctx context.Context, lease *Lease, status int, transportErr error) {
+	if lease == nil {
+		return
+	}
+	if lease.nodeScope != "" && lease.nodeScope != lease.Scope {
+		if transportErr != nil || status >= http.StatusInternalServerError || (lease.Scope != domain.ScopeBuild && status == http.StatusForbidden) {
+			m.mu.Lock()
+			m.invalidateClientForScopeLocked(lease.NodeID, lease.Scope)
+			m.mu.Unlock()
+		}
+		return
+	}
+	m.FeedbackForScope(ctx, lease.Scope, lease.NodeID, status, transportErr)
+}
+
 func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, nodeID uint64, status int, transportErr error) {
 	if nodeID == 0 {
 		if transportErr != nil || status >= 500 || (scope != domain.ScopeBuild && status == http.StatusForbidden) {
@@ -436,17 +512,22 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		}
 		return
 	}
+	m.feedbackMu.Lock()
+	defer m.feedbackMu.Unlock()
 	value, err := m.repository.GetEgressNode(ctx, nodeID)
 	if err != nil {
 		return
 	}
 	now := time.Now().UTC()
+	before := value.Health
+	kind := "noop"
 	switch {
 	case transportErr == nil && status >= 200 && status < 400:
 		value.Health = min(1, value.Health+0.1)
 		value.FailureCount = 0
 		value.CooldownUntil = nil
 		value.LastError = ""
+		kind = "success"
 	case status == http.StatusUnauthorized || status == http.StatusTooManyRequests:
 		return
 	case scope == domain.ScopeBuild && status == http.StatusForbidden:
@@ -459,15 +540,23 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		return
 	case status == http.StatusForbidden:
 		if m.isStickyProxyNode(value) {
-			// A 403 on an account-bound Resin lease usually means that account's
-			// clearance is stale. Do not cool or invalidate the shared node for
-			// unrelated accounts.
+			// Resin 的账号绑定会话只代表当前账号的 clearance；不能用一次账号失败
+			// 冷却共享节点并影响其他账号。
 			return
 		}
-		value.FailureCount++
-		value.Health = max(0.05, value.Health*0.7)
+		// 单次 403 可能是账号 clearance 或临时策略；第二次确认才毒化节点。
+		confirmed := value.FailureCount > 0 && value.LastError == "web rejection unconfirmed"
+		if confirmed {
+			value.FailureCount++
+			value.Health = max(0.05, value.Health*0.7)
+			value.LastError = "anti-bot rejection"
+			kind = "anti_bot"
+		} else {
+			value.FailureCount = 1
+			value.LastError = "web rejection unconfirmed"
+			kind = "anti_bot_suspect"
+		}
 		value.CooldownUntil = nil
-		value.LastError = "anti-bot rejection"
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)
 		m.mu.Unlock()
@@ -479,12 +568,29 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 		value.CooldownUntil = &until
 		if transportErr != nil {
 			value.LastError = "transport error"
+			kind = "transport"
 		} else {
 			value.LastError = fmt.Sprintf("upstream status %d", status)
+			kind = "status"
 		}
 		m.mu.Lock()
 		m.invalidateClientLocked(nodeID)
 		m.mu.Unlock()
+	}
+	crossed := before >= 0.5 && value.Health < 0.5
+	// 失败与跨阈值才记日志；常规成功恢复不刷量。
+	if kind != "success" || crossed {
+		slog.Default().Info("egress_feedback",
+			"node_id", nodeID,
+			"scope", string(scope),
+			"kind", kind,
+			"status", status,
+			"health_before", before,
+			"health_after", value.Health,
+			"failure_count", value.FailureCount,
+			"crossed_threshold", crossed,
+			"last_error", value.LastError,
+		)
 	}
 	if _, err := m.repository.UpdateEgressNode(ctx, value); err == nil {
 		m.invalidateNodes(value.Scope)

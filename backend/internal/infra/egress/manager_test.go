@@ -3,8 +3,10 @@ package egress
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,16 +124,6 @@ func TestConfiguredCoolingAppNodesNeverFallBackToDirect(t *testing.T) {
 	}}}, cipher)
 	if _, err := manager.Acquire(context.Background(), domain.ScopeWeb, "account"); err == nil {
 		t.Fatal("cooling configured node unexpectedly fell back to direct")
-	}
-}
-
-func TestDisabledConfiguredNodesAllowDirectFallback(t *testing.T) {
-	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{{
-		ID: 1, Name: "disabled-proxy", Scope: domain.ScopeBuild, Enabled: false, Health: 1,
-	}}}, nil)
-	lease, configured, err := manager.AcquireIfConfigured(context.Background(), domain.ScopeBuild, "")
-	if err != nil || configured || lease != nil {
-		t.Fatalf("disabled proxy fallback: lease=%#v configured=%v err=%v", lease, configured, err)
 	}
 }
 
@@ -389,27 +381,6 @@ func TestBuildForbiddenDoesNotPoisonEgressNode(t *testing.T) {
 	}
 }
 
-func TestWebForbiddenStillRebuildsBrowserSession(t *testing.T) {
-	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-	if err != nil {
-		t.Fatal(err)
-	}
-	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1}}
-	manager := NewManager(repository, cipher)
-	lease, err := manager.Acquire(context.Background(), domain.ScopeWeb, "account")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lease.Release()
-	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
-	if repository.updates != 1 || repository.node.Health >= 1 || repository.node.LastError != "anti-bot rejection" {
-		t.Fatalf("web 403 feedback = updates=%d node=%#v", repository.updates, repository.node)
-	}
-	if managerHasClientForNode(manager, 1) {
-		t.Fatal("web browser session was not invalidated after 403")
-	}
-}
-
 func TestStickyProxyForbiddenDoesNotCooldownSharedNode(t *testing.T) {
 	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	if err != nil {
@@ -494,6 +465,349 @@ func TestEgressNodeSnapshotAvoidsRepeatedRepositoryReads(t *testing.T) {
 	}
 	if repository.calls != 1 {
 		t.Fatalf("repository reads = %d, want 1", repository.calls)
+	}
+}
+
+func TestAffinitySelectionKeepsRecoverableNodesInMixedFleet(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 1}
+	}
+	for index := 0; index < 8; index++ {
+		nodes[index].Health = 0.7
+	}
+	counts := make(map[uint64]int)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("ready fleet returned no node")
+		}
+		if selected.Health < affinityHealthFloor {
+			t.Fatalf("selected node below fleet floor %d", selected.ID)
+		}
+		counts[selected.ID]++
+	}
+	if len(counts) != len(nodes) {
+		t.Fatalf("selected ready nodes=%d, want %d", len(counts), len(nodes))
+	}
+}
+
+func TestAffinitySelectionExcludesNodesBelowFleetFloor(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 1}
+	}
+	for index := 0; index < 8; index++ {
+		nodes[index].Health = affinityHealthFloor - 0.01
+	}
+	counts := make(map[uint64]int)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("ready fleet returned no node")
+		}
+		if selected.Health < affinityHealthFloor {
+			t.Fatalf("selected node below fleet floor %d", selected.ID)
+		}
+		counts[selected.ID]++
+	}
+	if len(counts) != 7 {
+		t.Fatalf("selected ready nodes=%d, want 7", len(counts))
+	}
+}
+
+func TestAffinitySelectionIncludesFleetFloorBoundary(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := []domain.Node{
+		{ID: 1, Health: 1},
+		{ID: 2, Health: affinityHealthFloor},
+	}
+	seen := make(map[uint64]bool)
+	for accountID := 1; accountID <= 1000; accountID++ {
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("fleet-floor boundary returned no node")
+		}
+		seen[selected.ID] = true
+	}
+	if !seen[2] {
+		t.Fatal("node at the fleet health floor never re-entered affinity selection")
+	}
+}
+
+func TestAffinitySelectionExcludesConfirmedAntiBotBeforeFleetSync(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := []domain.Node{
+		{ID: 1, Health: 1},
+		{ID: 2, Health: 0.7, LastError: "anti-bot rejection"},
+	}
+	for accountID := 1; accountID <= 1000; accountID++ {
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("safe node was not selected")
+		}
+		if selected.ID != 1 {
+			t.Fatalf("selected confirmed anti-bot node %d", selected.ID)
+		}
+	}
+}
+
+func TestAffinitySelectionDoesNotCollapseWhenEveryNodeIsBelowFleetFloor(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: affinityHealthFloor - 0.01}
+	}
+	counts := make(map[uint64]int)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		selected, ok := manager.selectNode(nodes, fmt.Sprintf("%d", accountID))
+		if !ok {
+			t.Fatal("degraded but safe fleet returned no node")
+		}
+		counts[selected.ID]++
+	}
+	if len(counts) != len(nodes) {
+		t.Fatalf("selected fallback nodes=%d, want %d", len(counts), len(nodes))
+	}
+}
+
+func TestAffinitySelectionFailsClosedWhenEveryNodeIsConfirmedAntiBot(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := []domain.Node{
+		{ID: 1, Health: 1, LastError: "anti-bot rejection"},
+		{ID: 2, Health: 0.7, LastError: "upstream anti-bot challenge"},
+	}
+	if selected, ok := manager.selectNode(nodes, "account"); ok {
+		t.Fatalf("selected confirmed anti-bot node %d", selected.ID)
+	}
+}
+
+func TestAcquireFailsClosedWhenEveryNodeIsConfirmedAntiBot(t *testing.T) {
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{
+		{ID: 1, Scope: domain.ScopeWeb, Enabled: true, Health: 1, LastError: "anti-bot rejection"},
+		{ID: 2, Scope: domain.ScopeWeb, Enabled: true, Health: 0.7, LastError: "upstream anti-bot challenge"},
+	}}, nil)
+	lease, err := manager.Acquire(context.Background(), domain.ScopeWeb, "account")
+	if lease != nil {
+		lease.Release()
+		t.Fatal("acquired confirmed anti-bot node")
+	}
+	if err == nil || !strings.Contains(err.Error(), "当前没有可用") {
+		t.Fatalf("Acquire error = %v", err)
+	}
+}
+
+func TestAffinitySelectionOnlyRemapsAssignmentsFromRemovedNode(t *testing.T) {
+	manager := NewManager(nil, nil)
+	nodes := make([]domain.Node, 15)
+	for index := range nodes {
+		nodes[index] = domain.Node{ID: uint64(index + 1), Health: 1}
+	}
+	remaining := append([]domain.Node(nil), nodes[:14]...)
+	for accountID := 1; accountID <= 10000; accountID++ {
+		affinity := fmt.Sprintf("%d", accountID)
+		before, beforeOK := manager.selectNode(nodes, affinity)
+		after, afterOK := manager.selectNode(remaining, affinity)
+		if !beforeOK || !afterOK {
+			t.Fatal("healthy fleet returned no node")
+		}
+		if before.ID != 15 && after.ID != before.ID {
+			t.Fatalf("account %d moved from node %d to node %d", accountID, before.ID, after.ID)
+		}
+	}
+}
+
+func TestConsoleFallbackFeedbackDoesNotCoolWebResinNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyURL, err := cipher.Encrypt("socks5h://Default.{account}:token@resin:2260")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{
+		ID: 7, Name: "shared-web", Scope: domain.ScopeWeb, Enabled: true, Health: 1,
+		EncryptedProxyURL: proxyURL,
+	}}
+	manager := NewManager(repository, cipher)
+	web, err := manager.AcquireCredential(context.Background(), domain.ScopeWeb, accountdomain.Credential{ID: 11, Provider: accountdomain.ProviderWeb})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer web.Release()
+	console, err := manager.AcquireCredential(context.Background(), domain.ScopeConsole, accountdomain.Credential{ID: 22, Provider: accountdomain.ProviderConsole})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer console.Release()
+
+	manager.FeedbackForLease(context.Background(), console, http.StatusBadGateway, errors.New("console transport failed"))
+
+	if repository.updates != 0 || repository.node.Health != 1 || repository.node.CooldownUntil != nil {
+		t.Fatalf("Web Resin node was mutated by Console feedback: updates=%d node=%#v", repository.updates, repository.node)
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	webClientPresent := false
+	consoleClientPresent := false
+	for key := range manager.clients {
+		webClientPresent = webClientPresent || (key.nodeID == 7 && key.scope == domain.ScopeWeb)
+		consoleClientPresent = consoleClientPresent || (key.nodeID == 7 && key.scope == domain.ScopeConsole)
+	}
+	if !webClientPresent {
+		t.Fatal("Web Resin client was invalidated by Console feedback")
+	}
+	if consoleClientPresent {
+		t.Fatal("failed Console fallback client was not invalidated")
+	}
+}
+
+func TestConsoleDoesNotFallBackToStaticWebNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{{
+		ID: 7, Name: "static-web", Scope: domain.ScopeWeb, Enabled: true, Health: 1,
+	}}}, cipher)
+	lease, err := manager.AcquireCredential(context.Background(), domain.ScopeConsole, accountdomain.Credential{
+		ID: 22, Provider: accountdomain.ProviderConsole,
+	})
+	if err == nil || lease != nil {
+		t.Fatalf("static Web node was reused for Console: lease=%#v err=%v", lease, err)
+	}
+}
+
+func TestBuildOAuthPending400DoesNotCoolEgressNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "build", Scope: domain.ScopeBuild, Enabled: true, Health: 1}}
+	manager := NewManager(repository, cipher)
+	lease, _, err := manager.AcquireIfConfigured(context.Background(), domain.ScopeBuild, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.Release()
+	manager.FeedbackForScope(context.Background(), domain.ScopeBuild, 1, http.StatusBadRequest, nil)
+	if repository.updates != 0 || repository.node.Health != 1 || repository.node.LastError != "" || repository.node.CooldownUntil != nil {
+		t.Fatalf("build OAuth pending 400 changed node: updates=%d node=%#v", repository.updates, repository.node)
+	}
+	if !managerHasClientForNode(manager, 1) {
+		t.Fatal("build client was invalidated by OAuth pending 400")
+	}
+}
+
+func TestWebForbiddenRequiresConfirmationBeforePoisoningNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1}}
+	manager := NewManager(repository, cipher)
+	lease, err := manager.Acquire(context.Background(), domain.ScopeWeb, "account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.Release()
+	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+	if repository.updates != 1 || repository.node.Health != 1 || repository.node.FailureCount != 1 || repository.node.LastError != "web rejection unconfirmed" {
+		t.Fatalf("first web 403 feedback = updates=%d node=%#v", repository.updates, repository.node)
+	}
+	if managerHasClientForNode(manager, 1) {
+		t.Fatal("web browser session was not invalidated after 403")
+	}
+	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+	if repository.updates != 2 || repository.node.Health >= 1 || repository.node.FailureCount != 2 || repository.node.LastError != "anti-bot rejection" {
+		t.Fatalf("confirmed web 403 feedback = updates=%d node=%#v", repository.updates, repository.node)
+	}
+}
+
+func TestWebSuccessClearsUnconfirmedRejection(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1}}
+	manager := NewManager(repository, cipher)
+	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+	manager.Feedback(context.Background(), 1, http.StatusOK, nil)
+	manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+	if repository.node.Health != 1 || repository.node.FailureCount != 1 || repository.node.LastError != "web rejection unconfirmed" {
+		t.Fatalf("web feedback after recovery = %#v", repository.node)
+	}
+}
+
+func TestConcurrentWebForbiddenFeedbackConfirmsNode(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1}}
+	manager := NewManager(repository, cipher)
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			manager.Feedback(context.Background(), 1, http.StatusForbidden, nil)
+		}()
+	}
+	close(start)
+	wait.Wait()
+	if repository.updates != 2 || repository.node.FailureCount != 2 || repository.node.LastError != "anti-bot rejection" {
+		t.Fatalf("concurrent web feedback = updates=%d node=%#v", repository.updates, repository.node)
+	}
+}
+
+func TestWebAssetFallsBackToWeb(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{
+		{ID: 2, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1},
+	}}, cipher)
+	webLease, err := manager.Acquire(context.Background(), domain.ScopeWeb, "account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer webLease.Release()
+	lease, err := manager.Acquire(context.Background(), domain.ScopeWebAsset, "account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if lease.NodeID != 2 {
+		t.Fatalf("node = %d, want web fallback node 2", lease.NodeID)
+	}
+	if lease.client != webLease.client {
+		t.Fatal("Web Asset fallback did not reuse the matching Web browser session")
+	}
+}
+
+func TestWebAssetFallsBackWhenAssetNodesAreConfirmedAntiBot(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{
+		{ID: 1, Name: "asset", Scope: domain.ScopeWebAsset, Enabled: true, Health: 1, LastError: "anti-bot rejection"},
+		{ID: 2, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1},
+	}}, cipher)
+	lease, err := manager.Acquire(context.Background(), domain.ScopeWebAsset, "account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if lease.NodeID != 2 {
+		t.Fatalf("node = %d, want safe web fallback node 2", lease.NodeID)
 	}
 }
 
