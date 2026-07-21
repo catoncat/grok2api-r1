@@ -308,3 +308,28 @@ func TestEffectivePublicAPIBaseURLPriority(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateS3MediaDriver(t *testing.T) {
+	base := defaultConfig()
+	base.Secrets.JWTSecret = "12345678901234567890123456789012"
+	base.Secrets.CredentialEncryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+	s3cfg := base
+	s3cfg.Media.Driver = "s3"
+	s3cfg.Media.S3 = S3MediaConfig{Bucket: "media", AccessKeyID: "id", SecretAccessKey: "secret"}
+	if err := s3cfg.Validate(); err != nil {
+		t.Fatalf("valid s3 media config rejected: %v", err)
+	}
+
+	missing := s3cfg
+	missing.Media.S3.Bucket = ""
+	if err := missing.Validate(); err == nil {
+		t.Fatal("s3 driver without bucket was accepted")
+	}
+
+	unknown := base
+	unknown.Media.Driver = "gcs"
+	if err := unknown.Validate(); err == nil {
+		t.Fatal("unsupported media driver was accepted")
+	}
+}

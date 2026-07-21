@@ -111,10 +111,32 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return nil, err
 	}
 	cfg = loadedConfig
-	localMediaStore, err := inframedia.NewLocalStore(cfg.Media.Local.Path)
-	if err != nil {
-		database.Close()
-		return nil, err
+	var mediaStore repository.MediaObjectStorage
+	mediaHealth := func(context.Context) error { return nil }
+	switch cfg.Media.Driver {
+	case "s3":
+		s3Store, s3Err := inframedia.NewS3Store(inframedia.S3Config{
+			Endpoint:        cfg.Media.S3.Endpoint,
+			Region:          cfg.Media.S3.Region,
+			Bucket:          cfg.Media.S3.Bucket,
+			AccessKeyID:     cfg.Media.S3.AccessKeyID,
+			SecretAccessKey: cfg.Media.S3.SecretAccessKey,
+			Prefix:          cfg.Media.S3.Prefix,
+			PublicBaseURL:   cfg.Media.S3.PublicBaseURL,
+		})
+		if s3Err != nil {
+			database.Close()
+			return nil, s3Err
+		}
+		mediaStore = s3Store
+		mediaHealth = s3Store.Ping
+	default:
+		localStore, lErr := inframedia.NewLocalStore(cfg.Media.Local.Path)
+		if lErr != nil {
+			database.Close()
+			return nil, lErr
+		}
+		mediaStore = localStore
 	}
 	var rateLimiter repository.RateLimiter
 	var concurrency repository.ConcurrencyLimiter
@@ -160,7 +182,10 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		database.Close()
 		return nil, fmt.Errorf("不支持的运行态驱动: %s", cfg.RuntimeStore.Driver)
 	}
-	mediaService := mediaapp.NewServiceWithTickets(mediaAssetRepo, mediaJobRepo, mediaUploadTicketRepo, localMediaStore, refreshLock, mediaConfig(cfg))
+	mediaService := mediaapp.NewServiceWithTickets(mediaAssetRepo, mediaJobRepo, mediaUploadTicketRepo, mediaStore, refreshLock, mediaConfig(cfg))
+	if s3Store, ok := mediaStore.(*inframedia.S3Store); ok {
+		mediaService.SetURLProvider(s3Store)
+	}
 
 	egressManager := infraegress.NewManager(egressRepo, cipher)
 	cliAdapter := cliprovider.NewAdapter(cliprovider.Config{
@@ -301,7 +326,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 
 	startup := newStartupState(len(windows))
 	readiness := func(readyCtx context.Context) httpserver.ReadinessSnapshot {
-		return readinessSnapshot(readyCtx, startup, runtimeHealth, modelRepo, accountRepo, providers)
+		return readinessSnapshot(readyCtx, startup, runtimeHealth, mediaHealth, modelRepo, accountRepo, providers)
 	}
 	router := httpserver.New(httpserver.Dependencies{Logger: logger, RequestTimeout: cfg.Server.RequestTimeout.Value(), MaxBodyBytes: cfg.Server.MaxBodyBytes, ConcurrencyGate: inferenceConcurrency, SecureCookies: cfg.Auth.SecureCookies, SwaggerEnabled: cfg.Server.SwaggerEnabled, PublicAPIBaseURL: cfg.Frontend.EffectivePublicAPIBaseURL(), FrontendStaticPath: cfg.Frontend.StaticPath, Readiness: readiness, TrafficReady: startup.acceptsTraffic, AdminAuth: adminService, Accounts: accountService, AccountSync: accountSyncService, Models: modelService, ClientKeys: clientKeyService, Audits: auditService, Dashboard: dashboardService, Gateway: gatewayService, Media: mediaService, Settings: settingsService, Egress: egressService, Updates: updateService})
 	server := &http.Server{Addr: cfg.Server.Listen, Handler: router, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: cfg.Server.ReadTimeout.Value(), IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}

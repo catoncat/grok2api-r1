@@ -31,11 +31,17 @@ var (
 )
 
 // Service 负责图片/视频校验、文件落盘和元数据持久化的一致性收口。
+// ObjectURLProvider allows the storage backend to provide a direct public URL.
+type ObjectURLProvider interface {
+	PublicURL(storageKey string) string
+}
+
 type Service struct {
 	assets        repository.MediaAssetRepository
 	jobs          repository.MediaJobRepository
 	tickets       repository.MediaUploadTicketRepository
 	objects       repository.MediaObjectStorage
+	urlProvider   ObjectURLProvider
 	cleanupLock   repository.DistributedLock
 	publicBaseURL string
 	configMu      sync.RWMutex
@@ -135,9 +141,26 @@ func (s *Service) SaveImage(ctx context.Context, data []byte) (mediadomain.Asset
 	return asset, nil
 }
 
-// PublicImageURL 返回可直接用于图片展示的公开资源地址。
+// PublicImageURL returns a URL for serving the image. When using S3 with a
+// PublicBaseURL, it queries the DB for the storage key and returns a direct
+// COS/S3 URL (bypassing the gateway). Otherwise falls back to the gateway
+// media endpoint.
 func (s *Service) PublicImageURL(id string) string {
+	if s.urlProvider != nil {
+		asset, err := s.assets.GetMediaAsset(context.Background(), strings.TrimSpace(id))
+		if err == nil && asset.Kind == "image" {
+			if u := s.urlProvider.PublicURL(asset.StorageKey); u != "" {
+				return u
+			}
+		}
+	}
 	return s.runtimeConfig().PublicBaseURL + "/v1/media/images/" + id
+}
+
+// SetURLProvider allows the application layer to inject an S3 URL provider
+// so PublicImageURL can return direct object URLs.
+func (s *Service) SetURLProvider(provider ObjectURLProvider) {
+	s.urlProvider = provider
 }
 
 // OpenImage 读取图片元数据和正文，不向调用方暴露实际文件路径。
