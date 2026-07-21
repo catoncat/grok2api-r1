@@ -921,8 +921,11 @@ func TestBuildChatPermissionDenialDoesNotInvalidateVideoCredential(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 || candidates[0].ModelQuotaBlock == nil || candidates[0].ModelQuotaBlock.Reason != "model_access_denied" {
+	if len(candidates) != 1 || candidates[0].ModelQuotaBlock == nil || candidates[0].ModelQuotaBlock.Reason != "model_permission_denied" {
 		t.Fatalf("model-scoped denial was not persisted: %#v", candidates)
+	}
+	if until := candidates[0].ModelQuotaBlock.CooldownUntil; until.Before(time.Now().Add(23*time.Hour)) {
+		t.Fatalf("permission denial cooldown should probe after 24h, got %v", until)
 	}
 }
 

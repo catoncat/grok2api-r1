@@ -33,6 +33,10 @@ const maxConcurrencySnapshots = 256
 
 const modelAccessDeniedCooldown = 5 * time.Minute
 
+// modelPermissionProbeInterval 是明确模型权限拒绝的冷却窗口：有效凭据对
+// 其他模型保持可用，24h 后才重新探针该模型（failure.scope.build_forbidden）。
+const modelPermissionProbeInterval = 24 * time.Hour
+
 type candidateSnapshot struct {
 	values    []account.RoutingCandidate
 	expiresAt time.Time
@@ -517,6 +521,21 @@ func (s *Selector) MarkModelQuotaExhausted(ctx context.Context, credential accou
 	until := time.Now().UTC().Add(retryAfter)
 	_ = s.accounts.UpsertModelQuotaBlock(ctx, account.ModelQuotaBlock{
 		AccountID: credential.ID, UpstreamModel: upstreamModel, Reason: "model_quota_depleted", CooldownUntil: until, UpdatedAt: time.Now().UTC(),
+	})
+	s.invalidateCandidates(credential.Provider)
+}
+
+// MarkModelPermissionDenied keeps a valid credential available for other models while
+// backing off the denied model until its upstream entitlement can be probed again.
+func (s *Selector) MarkModelPermissionDenied(ctx context.Context, credential account.Credential, upstreamModel string) {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if upstreamModel == "" {
+		return
+	}
+	now := time.Now().UTC()
+	_ = s.accounts.UpsertModelQuotaBlock(ctx, account.ModelQuotaBlock{
+		AccountID: credential.ID, UpstreamModel: upstreamModel, Reason: "model_permission_denied",
+		CooldownUntil: now.Add(modelPermissionProbeInterval), UpdatedAt: now,
 	})
 	s.invalidateCandidates(credential.Provider)
 }

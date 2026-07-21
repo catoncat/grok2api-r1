@@ -653,9 +653,23 @@ attemptLoop:
 				continue
 			}
 		}
+		responseRetryable := isRetryableResponse(response)
+		if !responseRetryable && credential.Provider == accountdomain.ProviderBuild && response.StatusCode == http.StatusForbidden {
+			// Build 403 在终止重试前先按响应正文分类：明确的模型权限拒绝只冷却
+			// 账号×该模型 24h，不进入账号级冷却或 reauth。
+			body, replay, _, readErr := readResponseBody(response.Body)
+			response.Body = replay
+			if readErr == nil {
+				terminalFailure := newHTTPUpstreamFailure(response.StatusCode, body, credential.ID, credential.Name)
+				if terminalFailure.ModelPermissionDenied {
+					s.selector.MarkModelPermissionDenied(ctx, credential, route.UpstreamModel)
+					s.selector.MarkQuotaStateChanged(credential.Provider)
+				}
+			}
+		}
 		egressForbidden := s.providers.RetryForbiddenAsEgress(credential.Provider) && response.StatusCode == http.StatusForbidden
 		finalEgressForbidden := egressForbidden && (attempt > 0 || attempt+1 >= attempts)
-		if isRetryableResponse(response) && !finalEgressForbidden {
+		if responseRetryable && !finalEgressForbidden {
 			retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
 			body, _ := readRetryableBody(response.Body)
 			if egressForbidden {
@@ -707,7 +721,11 @@ attemptLoop:
 				goto handleResponse
 			}
 			failureHandled := false
-			if freeBuildForbidden {
+			if credential.Provider == accountdomain.ProviderBuild && lastFailure.ModelPermissionDenied {
+				s.selector.MarkModelPermissionDenied(ctx, credential, route.UpstreamModel)
+				s.selector.MarkQuotaStateChanged(credential.Provider)
+				failureHandled = true
+			} else if freeBuildForbidden {
 				s.selector.MarkFailure(ctx, credential, response.StatusCode, retryAfter)
 				failureHandled = true
 			} else if lease.QuotaMode != "" && response.StatusCode == http.StatusTooManyRequests {
@@ -726,15 +744,9 @@ attemptLoop:
 			} else if lastFailure.QuotaExhausted {
 				failureHandled = s.selector.MarkPaidQuotaExhausted(ctx, credential, lease.Billing)
 			}
-			if s.providers.SupportsCredentialRefresh(credential.Provider) && lastFailure.PermanentAccountDenial {
-				if credential.Provider == accountdomain.ProviderBuild {
-					// A Build account may lack permission for one chat model while its OAuth credential and video
-					// access remain valid. Isolate this denial to the model; reauthorization is needed only when the credential is rejected.
-					s.selector.MarkModelAccessDenied(ctx, credential, route.UpstreamModel, retryAfter)
-				} else {
-					_ = s.accounts.MarkReauthRequired(ctx, credential.ID, fmt.Sprintf("%s chat endpoint access denied", credential.Provider))
-					s.selector.MarkQuotaStateChanged(credential.Provider)
-				}
+			if s.providers.SupportsCredentialRefresh(credential.Provider) && lastFailure.PermanentAccountDenial && !failureHandled {
+				_ = s.accounts.MarkReauthRequired(ctx, credential.ID, fmt.Sprintf("%s chat endpoint access denied", credential.Provider))
+				s.selector.MarkQuotaStateChanged(credential.Provider)
 				failureHandled = true
 			} else if s.providers.SupportsCredentialRefresh(credential.Provider) && lastFailure.CredentialRejected {
 				_ = s.accounts.MarkReauthRequired(ctx, credential.ID, fmt.Sprintf("%s credential rejected", credential.Provider))
