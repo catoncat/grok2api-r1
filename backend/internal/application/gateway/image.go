@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -199,15 +200,24 @@ func (s *Service) executeImage(
 				lease.Release()
 				continue
 			}
-			if !provider.IsMediaPostProcessingError(err) {
+			// 归档/存储失败与签名失败都不是账号失败：不 MarkFailure、不重新生成，
+			// 返回显式 502 media_postprocessing_failed（media.archive.failure_isolation）。
+			mediaPostProcessingFailed := provider.IsMediaPostProcessingError(err)
+			if !mediaPostProcessingFailed && !errors.Is(err, provider.ErrRequestSigning) {
 				s.selector.MarkFailure(ctx, credential, 0, 0)
 			}
 			lease.Release()
 			errorCode := "upstream_unavailable"
-			if provider.IsMediaPostProcessingError(err) {
+			if mediaPostProcessingFailed {
 				errorCode = "media_postprocessing_failed"
 			}
 			writeFailureAudit(http.StatusBadGateway, errorCode, &credential)
+			if mediaPostProcessingFailed {
+				return nil, &UpstreamFailure{
+					HTTPStatus: http.StatusBadGateway, Code: errorCode,
+					PublicMessage: "图片已生成，但本地后处理失败", AccountID: credential.ID, AccountName: credential.Name, Cause: err,
+				}
+			}
 			return nil, err
 		}
 		if response.StatusCode == http.StatusUnauthorized && credential.AuthType == accountdomain.AuthTypeSSO {

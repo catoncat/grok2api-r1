@@ -135,7 +135,7 @@ func (s *S3Store) Delete(ctx context.Context, storageKey string) error {
 }
 
 // S3Store 的视频对象方法暂不支持：r1 的 COS 边界只覆盖图片交付
-//（defer-independent-design；本地驱动保留上游视频票据能力）。
+// （defer-independent-design；本地驱动保留上游视频票据能力）。
 func (s *S3Store) SaveVideo(context.Context, string, string, []byte) (string, error) {
 	return "", fmt.Errorf("S3 存储暂不支持视频对象")
 }

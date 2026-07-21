@@ -1086,8 +1086,8 @@ func TestImageStreamUsesOfficialOpenAIEventsWithoutTokenUsage(t *testing.T) {
 	if err != nil || urlItem["url"] != "https://api.example/v1/media/images/img_test" || urlItem["mime_type"] != "image/jpeg" || urlItem["revised_prompt"] != "" {
 		t.Fatalf("url item = %#v, err=%v", urlItem, err)
 	}
-	b64Item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: "aW1hZ2U="}, "b64_json")
-	if err != nil || b64Item["b64_json"] != "aW1hZ2U=" || b64Item["mime_type"] != "image/jpeg" {
+	b64Item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}, "b64_json")
+	if err != nil || b64Item["b64_json"] != "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" || b64Item["mime_type"] != "image/png" {
 		t.Fatalf("base64 item = %#v, err=%v", b64Item, err)
 	}
 	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
@@ -1566,5 +1566,21 @@ func TestGeneratedImageDirectFallbackPolicy(t *testing.T) {
 	}
 	if shouldFallbackDirectImage(http.StatusNotFound, nil) || shouldFallbackDirectImage(http.StatusInternalServerError, nil) {
 		t.Fatal("non-auth HTTP failures must not spend residential bandwidth on a duplicate download")
+	}
+}
+
+func TestImageDataItemBase64BypassesStorage(t *testing.T) {
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	store := &imageAssetStoreRetryStub{}
+	adapter := &Adapter{assets: store}
+	item, err := adapter.imageDataItem(context.Background(), account.Credential{}, imagineImageValue{Blob: png}, "b64_json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item["b64_json"] != png || item["mime_type"] != "image/png" {
+		t.Fatalf("base64 item = %#v", item)
+	}
+	if store.calls != 0 {
+		t.Fatalf("base64 output touched storage %d times", store.calls)
 	}
 }
