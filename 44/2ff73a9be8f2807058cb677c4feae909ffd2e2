@@ -1,0 +1,50 @@
+frontend/src/features/client-keys/client-keys-page.tsx
+  s_8eb1d458b8bf05::t_e681cac280b55c 66,68,70,75-78,83,87-89,107-108,111,177,187,189-192,323-324
+  s_8eb1d458b8bf05::t_12e700f863a02e 356-375,392-403
+frontend/src/shared/i18n/index.ts
+  s_8eb1d458b8bf05::t_e95c273a4be8ed 512,517,961
+backend/internal/infra/persistence/relational/schema.go
+  s_8eb1d458b8bf05::t_56bec52a55dcc3 92-94,147-181,183-184
+  s_8eb1d458b8bf05::t_82f21c2985ff59 182
+  s_f1043145bc2bec::t_d53fd70107acd4 185
+backend/internal/application/clientkey/service.go
+  s_8eb1d458b8bf05::t_70136dd7359182 36,38,144-146,149-151,154-155,201-202,207-208,297-304,306-316
+backend/internal/application/clientkey/service_test.go
+  s_8eb1d458b8bf05::t_90860b341e0b51 51-53,61-92
+backend/internal/infra/persistence/relational/client_key_repository.go
+  s_8eb1d458b8bf05::t_0cab5f0ce92023 87-102
+backend/internal/infra/persistence/relational/models.go
+  s_8eb1d458b8bf05::t_ed600f281b4eda 220-221
+backend/internal/infra/persistence/relational/schema_client_key_limits_upgrade_test.go
+  s_8eb1d458b8bf05::t_fd7430bae93a64 1-108
+backend/internal/transport/http/clientkey/handler.go
+  s_8eb1d458b8bf05::t_26eb4427c4a5bc 35-36,150-159
+backend/internal/transport/http/clientkey/handler_test.go
+  s_8eb1d458b8bf05::t_6a0ca57787a514 1-64
+frontend/src/shared/components/date-time-picker.tsx
+  s_8eb1d458b8bf05::t_1f4f0c7daa1567 3,19,22,52-59,68,70,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "442ff73a9be8f2807058cb677c4feae909ffd2e2",
+  "prompts": {},
+  "sessions": {
+    "s_8eb1d458b8bf05": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8260-c3bc-76d6-99f9-88915a9a8818",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_f1043145bc2bec": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f830e-a8ef-763d-8004-a37e175f763e",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
