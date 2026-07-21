@@ -13,6 +13,11 @@ import (
 	httpserver "github.com/chenyme/grok2api/backend/internal/transport/http"
 )
 
+type startupAccountRepository interface {
+	ListEnabledBatch(context.Context, accountdomain.Provider, int) ([]accountdomain.Credential, error)
+	CountActiveCooldowns(context.Context, time.Time) (int64, error)
+}
+
 const (
 	startupRecoveryBudget     = 20 * time.Second
 	startupCriticalWindow     = 2 * time.Minute
@@ -264,20 +269,11 @@ func (a *Application) reconcileStartup(ctx context.Context) {
 		a.logger.Warn("model_cooldown_cleanup_failed", "error", err)
 		a.startup.recordError(err)
 	}
-	for _, providerValue := range accountdomain.Providers() {
-		values, err := a.accountRepo.ListEnabled(recoveryCtx, providerValue)
-		if err != nil {
-			a.startup.recordError(err)
-			continue
-		}
-		now := time.Now().UTC()
-		a.startup.updateReport(func(report *startupReport) {
-			for _, value := range values {
-				if value.CooldownUntil != nil && now.Before(*value.CooldownUntil) {
-					report.CooldownsRestored++
-				}
-			}
-		})
+	cooldowns, err := a.startupAccounts.CountActiveCooldowns(recoveryCtx, time.Now().UTC())
+	if err != nil {
+		a.startup.recordError(err)
+	} else {
+		a.startup.updateReport(func(report *startupReport) { report.CooldownsRestored = int(cooldowns) })
 	}
 	report, err := a.accounts.RecoverCriticalCredentials(recoveryCtx, startupCriticalWindow, startupCriticalLimit)
 	a.startup.updateReport(func(startup *startupReport) { startup.Credentials = report })
@@ -299,7 +295,7 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 		case <-timer.C:
 		}
 		a.startup.setStatsig("warming", "正在预热 Statsig meta", 0)
-		values, err := a.accountRepo.ListEnabled(ctx, accountdomain.ProviderWeb)
+		values, err := a.startupAccounts.ListEnabledBatch(ctx, accountdomain.ProviderWeb, statsigWarmupAccountLimit)
 		if err == nil && len(values) == 0 {
 			a.startup.setStatsig("disabled", "没有启用的 Grok Web 账号", 0)
 		} else if err == nil {
