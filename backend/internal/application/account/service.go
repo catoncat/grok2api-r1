@@ -2388,7 +2388,7 @@ func (s *Service) syncAllQuotasWithProgress(ctx context.Context, providerValue a
 	})
 }
 
-// SyncWebQuotaAccounts 同步指定 Web 账号集合，供启动追赶任务复用共享并发池。
+// SyncWebQuotaAccounts 同步显式指定的 Web 账号集合，供有界管理批次复用共享并发池。
 func (s *Service) SyncWebQuotaAccounts(ctx context.Context, ids []uint64) (int, int, error) {
 	return s.runAccountBatch(ctx, "web_quota_startup_catchup", ids, s.syncPool, nil, func(workCtx context.Context, id uint64) error {
 		_, err := s.RefreshWebQuota(workCtx, id)

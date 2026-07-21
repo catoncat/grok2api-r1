@@ -468,10 +468,6 @@ func (a *Application) Run(ctx context.Context) error {
 		a.runStatsigWarmup(taskCtx)
 		return nil
 	})
-	startBackground("web_quota_startup_catchup", func(taskCtx context.Context) error {
-		a.runWebQuotaCatchup(taskCtx)
-		return nil
-	})
 	startBackground("model_catalog_startup_catchup", func(taskCtx context.Context) error {
 		a.runModelCatalogCatchup(taskCtx)
 		return nil
@@ -502,7 +498,6 @@ func (a *Application) Run(ctx context.Context) error {
 			})
 		})
 	}
-	a.queueDueWebQuotaRefresh(runCtx)
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

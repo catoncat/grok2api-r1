@@ -13,6 +13,7 @@ import (
 	auditdomain "github.com/chenyme/grok2api/backend/internal/domain/audit"
 	clientkeydomain "github.com/chenyme/grok2api/backend/internal/domain/clientkey"
 	inferencedomain "github.com/chenyme/grok2api/backend/internal/domain/inference"
+	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/repository"
 )
 
@@ -50,6 +51,186 @@ func TestSchemaAndRepositoryConstraints(t *testing.T) {
 	updated, wasCreated, err := accountRepo.UpsertByIdentity(context.Background(), value)
 	if err != nil || wasCreated || updated.ID != created.ID || updated.Name != "updated" || updated.LastUsedAt == nil || updated.ObservedModel != "grok-observed" || updated.ObservedModelAt == nil || updated.EncryptedCloudflareCookie != "encrypted-cf" {
 		t.Fatalf("幂等 upsert = %#v, %v, %v", updated, wasCreated, err)
+	}
+}
+
+func TestHasActiveFiltersUnavailableCredentials(t *testing.T) {
+	database := openTestDatabase(t)
+	repo := NewAccountRepository(database)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	web, _, err := repo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, Name: "web", SourceKey: "web-active",
+		EncryptedAccessToken: testEncryptedToken, ExpiresAt: now.Add(-time.Hour), Enabled: true,
+		AuthStatus: account.AuthStatusActive, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderWeb, "", ""); err != nil || !active {
+		t.Fatalf("expired non-refreshable Web active=%v err=%v", active, err)
+	}
+	cooldown := now.Add(time.Hour)
+	if err := repo.UpdateHealth(ctx, web.ID, 1, &cooldown, "cooling", false); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderWeb, "", ""); err != nil || active {
+		t.Fatalf("cooling Web active=%v err=%v", active, err)
+	}
+	if err := repo.UpdateHealth(ctx, web.ID, 0, nil, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveQuotaRecovery(ctx, account.QuotaRecovery{
+		AccountID: web.ID, Kind: account.QuotaRecoveryKindFree, Status: account.QuotaRecoveryStatusExhausted,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderWeb, "", ""); err != nil || active {
+		t.Fatalf("exhausted Web active=%v err=%v", active, err)
+	}
+
+	console, _, err := repo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderConsole, AuthType: account.AuthTypeSSO, Name: "console", SourceKey: "console-active",
+		EncryptedAccessToken: testEncryptedToken, Enabled: true, AuthStatus: account.AuthStatusActive, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := quotaWindowModel{
+		AccountID: console.ID, Mode: "console:test", Remaining: 0, Total: 20, BreakdownJSON: "[]",
+		WindowSeconds: 3600, Source: string(account.QuotaSourceDefault), UpdatedAt: now,
+	}
+	if err := database.db.Create(&window).Error; err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderConsole, "", "console:test"); err != nil || active {
+		t.Fatalf("quota-exhausted Console active=%v err=%v", active, err)
+	}
+	if err := database.db.Model(&quotaWindowModel{}).Where("account_id = ?", console.ID).Update("remaining", 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderConsole, "", "console:test"); err != nil || !active {
+		t.Fatalf("restored Console active=%v err=%v", active, err)
+	}
+	models := NewModelRepository(database)
+	if err := models.UpsertRoutes(ctx, []modeldomain.Route{
+		{PublicID: "console-model-a", Provider: account.ProviderConsole, UpstreamModel: "model-a", Capability: modeldomain.CapabilityResponses, Enabled: true},
+		{PublicID: "console-model-b", Provider: account.ProviderConsole, UpstreamModel: "model-b", Capability: modeldomain.CapabilityResponses, Enabled: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.ReplaceAccountCapabilities(ctx, console.ID, []string{"model-a"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.db.Create(&quotaWindowModel{
+		AccountID: console.ID, Mode: "console:model-a", Remaining: 0, Total: 20, BreakdownJSON: "[]",
+		WindowSeconds: 3600, Source: string(account.QuotaSourceDefault), UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.db.Create(&quotaWindowModel{
+		AccountID: console.ID, Mode: "console:model-b", Remaining: 1, Total: 20, BreakdownJSON: "[]",
+		WindowSeconds: 3600, Source: string(account.QuotaSourceDefault), UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderConsole, "model-b", "console:model-b"); err != nil || active {
+		t.Fatalf("unsupported Console model active=%v err=%v", active, err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderConsole, "model-a", "console:model-a"); err != nil || active {
+		t.Fatalf("quota-exhausted Console model active=%v err=%v", active, err)
+	}
+	if err := database.db.Model(&quotaWindowModel{}).
+		Where("account_id = ? AND mode = ?", console.ID, "console:model-a").
+		Update("remaining", 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderConsole, "model-a", "console:model-a"); err != nil || !active {
+		t.Fatalf("supported Console model active=%v err=%v", active, err)
+	}
+	if err := repo.UpsertModelQuotaBlock(ctx, account.ModelQuotaBlock{
+		AccountID: console.ID, UpstreamModel: "model-a", Reason: "test", CooldownUntil: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderConsole, "model-a", "console:model-a"); err != nil || active {
+		t.Fatalf("model-blocked Console active=%v err=%v", active, err)
+	}
+
+	build, _, err := repo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderBuild, AuthType: account.AuthTypeOAuth, Name: "build", SourceKey: "build-active",
+		EncryptedAccessToken: testEncryptedToken, ExpiresAt: now.Add(-time.Hour), Enabled: true,
+		AuthStatus: account.AuthStatusActive, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderBuild, "", ""); err != nil || active {
+		t.Fatalf("expired Build active=%v err=%v", active, err)
+	}
+	if _, err := repo.UpdateTokens(ctx, build.ID, testEncryptedToken, "refresh", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveBilling(ctx, account.Billing{AccountID: build.ID, MonthlyLimit: 10, Used: 10, SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderBuild, "", ""); err != nil || active {
+		t.Fatalf("billing-exhausted Build active=%v err=%v", active, err)
+	}
+}
+
+func TestHasActiveMatchesWebQuotaWindowPrecedence(t *testing.T) {
+	database := openTestDatabase(t)
+	repo := NewAccountRepository(database)
+	models := NewModelRepository(database)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	web, _, err := repo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, Name: "web", SourceKey: "web-quota",
+		EncryptedAccessToken: testEncryptedToken, Enabled: true, AuthStatus: account.AuthStatusActive, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := models.UpsertRoutes(ctx, []modeldomain.Route{{
+		PublicID: "web-model", Provider: account.ProviderWeb, UpstreamModel: "model", Capability: modeldomain.CapabilityChat, Enabled: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.ReplaceAccountCapabilities(ctx, web.ID, []string{"model"}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, window := range []quotaWindowModel{
+		{AccountID: web.ID, Mode: "weekly", Remaining: 0, Total: 20, BreakdownJSON: "[]", WindowSeconds: 3600, Source: string(account.QuotaSourceDefault), UpdatedAt: now},
+		{AccountID: web.ID, Mode: "fast", Remaining: 1, Total: 20, BreakdownJSON: "[]", WindowSeconds: 3600, Source: string(account.QuotaSourceDefault), UpdatedAt: now},
+	} {
+		if err := database.db.Create(&window).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderWeb, "model", "fast"); err != nil || active {
+		t.Fatalf("exhausted weekly Web active=%v err=%v", active, err)
+	}
+	if err := database.db.Model(&quotaWindowModel{}).
+		Where("account_id = ? AND mode = ?", web.ID, "weekly").
+		Update("remaining", 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.db.Model(&quotaWindowModel{}).
+		Where("account_id = ? AND mode = ?", web.ID, "fast").
+		Update("remaining", 0).Error; err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderWeb, "model", "fast"); err != nil || !active {
+		t.Fatalf("available weekly Web active=%v err=%v", active, err)
+	}
+	if err := database.db.Where("account_id = ? AND mode = ?", web.ID, "weekly").Delete(&quotaWindowModel{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repo.HasActive(ctx, account.ProviderWeb, "model", "fast"); err != nil || active {
+		t.Fatalf("exhausted fallback mode Web active=%v err=%v", active, err)
 	}
 }
 
