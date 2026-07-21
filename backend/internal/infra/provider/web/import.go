@@ -126,9 +126,10 @@ func parsePlainTextCredentials(value string) ([]provider.CredentialSeed, error) 
 func (a *Adapter) MarshalCredentials(values []provider.CredentialSeed) ([]byte, error) {
 	document := importDocument{Provider: string(account.ProviderWeb), Accounts: make([]importEntry, 0, len(values))}
 	for _, value := range values {
+		// 导出不含 cloudflare_cookies（r1 安全边界）；其余身份/资料字段保留。
 		document.Accounts = append(document.Accounts, importEntry{
 			Name: value.Name, Email: value.Email, UserID: value.UserID, SSOToken: value.AccessToken,
-			Tier: string(value.WebTier), CloudflareCookies: value.CloudflareCookies,
+			Tier: string(value.WebTier),
 			NSFWEnabledAt: value.WebNSFWEnabledAt, TOSAcceptedAt: value.WebTermsAcceptedAt,
 			TOSVersion: value.WebTermsAcceptedVersion, BirthDateSetAt: value.WebBirthDateSetAt,
 		})

@@ -1224,6 +1224,23 @@ func (r *AccountRepository) UpdateCredentialRefreshFailure(ctx context.Context, 
 	}).Error
 }
 
+// UpdateTeamID persists upstream-observed routing metadata without changing the
+// account's stable import identity key.
+func (r *AccountRepository) UpdateTeamID(ctx context.Context, id uint64, teamID string) error {
+	teamID = strings.TrimSpace(teamID)
+	if id == 0 || teamID == "" || len(teamID) > 255 {
+		return repository.ErrConflict
+	}
+	result := r.db.db.WithContext(ctx).Model(&accountModel{}).Where("id = ?", id).Update("team_id", teamID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
 func (r *AccountRepository) UpdateObservedModel(ctx context.Context, id uint64, model string, observedAt time.Time) error {
 	return r.db.db.WithContext(ctx).Model(&accountModel{}).Where("id = ?", id).Updates(map[string]any{"observed_model": truncate(model, 255), "observed_model_at": observedAt}).Error
 }

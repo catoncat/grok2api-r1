@@ -624,7 +624,11 @@ attemptLoop:
 			break
 		}
 		excluded[lease.Credential.ID] = true
-		if limited, ok := s.activeTeamModelRateLimit(lease.Credential, route.UpstreamModel, time.Now().UTC()); ok {
+		rateLimitModelKey := quotaMode
+		if rateLimitModelKey == "" {
+			rateLimitModelKey = strings.TrimSpace(route.UpstreamModel)
+		}
+		if limited, ok := s.activeTeamModelRateLimit(lease.Credential, rateLimitModelKey, time.Now().UTC()); ok {
 			lease.Release()
 			lastFailure = &UpstreamFailure{
 				HTTPStatus: http.StatusTooManyRequests, Code: "upstream_rate_limited", PublicMessage: "上游请求频率受限",
@@ -761,8 +765,27 @@ attemptLoop:
 			if freeBuildForbidden {
 				lastFailure.AccountScoped = true
 			}
-			if response.StatusCode == http.StatusTooManyRequests && response.RateLimit != nil && response.RateLimit.TeamID != "" && response.RateLimit.Model == route.UpstreamModel {
-				limited := s.markTeamModelRateLimit(credential, route.UpstreamModel, *response.RateLimit, time.Now().UTC())
+			metadataModelKey := ""
+			if response.RateLimit != nil {
+				metadataModelKey = s.providers.QuotaMode(credential.Provider, response.RateLimit.Model)
+				if metadataModelKey == "" {
+					metadataModelKey = strings.TrimSpace(response.RateLimit.Model)
+				}
+			}
+			if response.StatusCode == http.StatusTooManyRequests && response.RateLimit != nil && response.RateLimit.TeamID != "" && metadataModelKey == rateLimitModelKey {
+				// 429 学到的 Team 归属持久化为账号归因（并存兼容 Q1）；只读更新，
+				// 失败只记日志不阻断请求。
+				if credential.TeamID != response.RateLimit.TeamID {
+					persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizationTimeout)
+					observeErr := s.accounts.ObserveTeamID(persistCtx, credential.ID, response.RateLimit.TeamID)
+					cancel()
+					if observeErr != nil {
+						s.logger.Warn("upstream_team_identity_persist_failed", "request_id", input.RequestID, "provider", credential.Provider, "account_id", credential.ID, "error", observeErr)
+					} else {
+						s.selector.MarkQuotaStateChanged(credential.Provider)
+					}
+				}
+				limited := s.markTeamModelRateLimit(credential, rateLimitModelKey, *response.RateLimit, time.Now().UTC())
 				lastFailure.AccountScoped = false
 				lastFailure.Fingerprint = "429:team_model_rate_limit"
 				lastFailure.RetryAfter = time.Until(limited.Until)
