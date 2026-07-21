@@ -1,0 +1,19 @@
+backend/internal/infra/persistence/relational/schema_client_key_limits_postgres_test.go
+  s_8eb1d458b8bf05::t_374ced0b791607 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "9105c324cab1425185a482156b22ed04f61f4feb",
+  "prompts": {},
+  "sessions": {
+    "s_8eb1d458b8bf05": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8260-c3bc-76d6-99f9-88915a9a8818",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
