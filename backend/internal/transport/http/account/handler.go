@@ -191,6 +191,8 @@ type batchDeleteRequest struct {
 type accountCleanupRequest struct {
 	Provider string                     `json:"provider" binding:"required"`
 	Statuses []accountapp.CleanupStatus `json:"statuses" binding:"required"`
+	Limit    int                        `json:"limit" binding:"required"`
+	DryRun   *bool                      `json:"dryRun"`
 }
 
 type buildConversionRequest struct {
@@ -477,12 +479,20 @@ func (h *Handler) cleanup(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalidRequest", "请求参数无效")
 		return
 	}
-	deleted, err := h.service.CleanupAccounts(c.Request.Context(), accountdomain.Provider(request.Provider), request.Statuses)
+	// 默认 dry-run：只有调用方显式传 dryRun=false 才会真实删除（cleanup.dry_run_default）。
+	dryRun := true
+	if request.DryRun != nil {
+		dryRun = *request.DryRun
+	}
+	result, err := h.service.CleanupAccounts(c.Request.Context(), accountdomain.Provider(request.Provider), request.Statuses, request.Limit, dryRun)
 	if err != nil {
 		h.writeServiceError(c, "accountCleanupFailed", err, http.StatusInternalServerError, "清理账号失败")
 		return
 	}
-	response.Success(c, http.StatusOK, gin.H{"deleted": deleted})
+	response.Success(c, http.StatusOK, gin.H{
+		"matched": result.Matched, "protected": result.Protected, "eligible": result.Eligible,
+		"skipped": result.Skipped, "deleted": result.Deleted, "dryRun": result.DryRun,
+	})
 }
 
 func (h *Handler) batchRefreshQuotas(c *gin.Context) {

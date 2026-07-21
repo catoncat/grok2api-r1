@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	accountapp "github.com/chenyme/grok2api/backend/internal/application/account"
 	accountsyncapp "github.com/chenyme/grok2api/backend/internal/application/accountsync"
 	accountdomain "github.com/chenyme/grok2api/backend/internal/domain/account"
+	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/gin-gonic/gin"
 )
 
@@ -210,5 +212,43 @@ func TestAccountSyncPipelineUsesFinalQueuedTotal(t *testing.T) {
 		if value[1] != 3 {
 			t.Fatalf("progress contains changing total: %#v", progress)
 		}
+	}
+}
+
+func TestCleanupDefaultsToDryRun(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "cleanup-handler.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accounts := relational.NewAccountRepository(database)
+	value, _, err := accounts.UpsertByIdentity(ctx, accountdomain.Credential{
+		Provider: accountdomain.ProviderBuild, Name: "disabled", SourceKey: "cleanup-handler",
+		EncryptedAccessToken: "encrypted", Enabled: true, AuthStatus: accountdomain.AuthStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.Enabled = false
+	if _, err := accounts.Update(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	requestContext, _ := gin.CreateTestContext(recorder)
+	requestContext.Request = httptest.NewRequest("POST", "/api/admin/v1/accounts/cleanup", strings.NewReader(`{"provider":"grok_build","statuses":["disabled"],"limit":10}`))
+	requestContext.Request.Header.Set("Content-Type", "application/json")
+	NewHandler(accountapp.NewService(accounts, nil, nil, nil, nil, nil, nil), nil).cleanup(requestContext)
+
+	if recorder.Code != 200 || !strings.Contains(recorder.Body.String(), `"dryRun":true`) || !strings.Contains(recorder.Body.String(), `"deleted":0`) {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := accounts.Get(ctx, value.ID); err != nil {
+		t.Fatalf("default dry-run deleted account: %v", err)
 	}
 }

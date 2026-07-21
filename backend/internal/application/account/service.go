@@ -134,7 +134,19 @@ const (
 	CleanupStatusCooldown       CleanupStatus = "cooldown"
 	CleanupStatusDisabled       CleanupStatus = "disabled"
 	CleanupStatusReauthRequired CleanupStatus = "reauthRequired"
+	maxCleanupAccounts                        = 500
 )
+
+// CleanupResult 汇总一次有界清理预检/执行；Protected 是有模型路由绑定、
+// 不可删除的账号数，DryRun 为 true 时不发生任何删除。
+type CleanupResult struct {
+	Matched   int
+	Protected int
+	Eligible  int
+	Skipped   int
+	Deleted   int
+	DryRun    bool
+}
 
 type DeviceStartResult struct {
 	SessionID               string
@@ -501,52 +513,55 @@ func (s *Service) AccountsBelongToProvider(ctx context.Context, ids []uint64, pr
 	return count == int64(len(values)), nil
 }
 
-// CleanupAccounts 按管理端状态清理指定 Provider 账号；正常、待重置和检测中的账号不在清理范围内。
-func (s *Service) CleanupAccounts(ctx context.Context, providerValue accountdomain.Provider, statuses []CleanupStatus) (int64, error) {
+// CleanupAccounts 按明确状态、有限数量清理账号；调用方必须显式关闭 dry-run 才会删除。
+func (s *Service) CleanupAccounts(ctx context.Context, providerValue accountdomain.Provider, statuses []CleanupStatus, limit int, dryRun bool) (CleanupResult, error) {
 	if !providerValue.IsValid() {
-		return 0, invalidInput("账号来源无效")
+		return CleanupResult{}, invalidInput("账号来源无效")
+	}
+	if limit < 1 || limit > maxCleanupAccounts {
+		return CleanupResult{}, invalidInput(fmt.Sprintf("单次最多处理 %d 个账号", maxCleanupAccounts))
 	}
 	selected := make(map[CleanupStatus]struct{}, len(statuses))
 	for _, status := range statuses {
 		switch status {
-		case CleanupStatusCooldown, CleanupStatusDisabled, CleanupStatusReauthRequired:
+		case CleanupStatusDisabled, CleanupStatusReauthRequired, CleanupStatusCooldown:
 			selected[status] = struct{}{}
 		default:
-			return 0, invalidInput("账号清理状态无效")
+			return CleanupResult{}, invalidInput("账号清理状态无效")
 		}
 	}
 	if len(selected) == 0 {
-		return 0, invalidInput("至少选择一种账号状态")
+		return CleanupResult{}, invalidInput("至少选择一种账号状态")
 	}
 
-	const cleanupBatchSize = 500
-	now := s.now()
-	var deleted int64
+	result := CleanupResult{DryRun: dryRun}
 	for _, status := range []CleanupStatus{CleanupStatusDisabled, CleanupStatusReauthRequired, CleanupStatusCooldown} {
-		if _, ok := selected[status]; !ok {
+		if _, ok := selected[status]; !ok || result.Matched >= limit {
 			continue
 		}
-		for {
-			ids, candidates, err := s.accounts.DeleteAccountStatusBatch(ctx, providerValue, string(status), now, cleanupBatchSize)
-			if err != nil {
-				return deleted, mapRepositoryError(err)
-			}
-			for _, id := range ids {
-				if s.sticky != nil {
-					_ = s.sticky.DeleteByAccount(ctx, id)
-				}
-				s.clearRefreshState(id)
-			}
-			deleted += int64(len(ids))
-			if candidates < cleanupBatchSize {
-				break
-			}
+		batch, err := s.accounts.CleanupAccountStatusBatch(ctx, providerValue, string(status), s.now(), limit-result.Matched, dryRun)
+		if err != nil {
+			return result, mapRepositoryError(err)
 		}
+		result.Matched += batch.Matched
+		result.Protected += batch.Protected
+		result.Eligible += batch.Eligible
+		result.Skipped += batch.Skipped
+		if dryRun {
+			continue
+		}
+		for _, id := range batch.DeletedIDs {
+			if s.sticky != nil {
+				_ = s.sticky.DeleteByAccount(ctx, id)
+			}
+			s.clearRefreshState(id)
+		}
+		result.Deleted += len(batch.DeletedIDs)
 	}
-	if deleted > 0 {
+	if result.Deleted > 0 {
 		s.invalidateBuildBotFlagCache()
 	}
-	return deleted, nil
+	return result, nil
 }
 
 func (s *Service) Get(ctx context.Context, id uint64) (View, error) {
