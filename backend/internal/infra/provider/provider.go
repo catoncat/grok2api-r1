@@ -20,6 +20,7 @@ var (
 	ErrCredentialLimit      = errors.New("credential count exceeds limit")
 	ErrUnauthorized         = errors.New("upstream credential unauthorized")
 	ErrBirthDateAlreadySet  = errors.New("upstream birth date is already set")
+	ErrRequestSigning       = errors.New("provider request signing failed")
 )
 
 // HTTPStatusError preserves the upstream status when a streaming or asynchronous Provider cannot return a Response.

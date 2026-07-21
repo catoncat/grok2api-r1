@@ -180,7 +180,10 @@ func (a *Adapter) executeWebAccountSetting(ctx context.Context, token string, le
 			request.Header.Set("x-user-agent", "connect-es/2.1.1")
 		}
 		if input.statsig {
-			a.applySignedStatsig(requestCtx, request, token, lease)
+			if err := a.applySignedStatsig(requestCtx, request, token, lease, attempt > 0); err != nil {
+				cancel()
+				return err
+			}
 		}
 
 		response, requestErr := lease.Do(request)

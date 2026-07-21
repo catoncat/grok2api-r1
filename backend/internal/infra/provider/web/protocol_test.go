@@ -303,7 +303,7 @@ func TestChatImageUploadFeedsFileMetadataIntoConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	content, _ := json.Marshal([]any{
 		map[string]any{"type": "text", "text": "inspect"},
 		map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURI}},
@@ -364,7 +364,7 @@ func TestForwardMessagesWebSearchEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual"}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+			adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: testStatsigID(1)}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 			body, _ := json.Marshal(map[string]any{
 				"model": "public", "max_tokens": 256, "stream": streaming,
 				"messages":    []any{map[string]any{"role": "user", "content": "Perform a web search for the query: rust tutorials"}},
