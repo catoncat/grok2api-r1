@@ -45,7 +45,6 @@ func TestParseCapturedWeeklyCreditsResponse(t *testing.T) {
 	}
 }
 
-
 func TestParseCoarseWeeklyCreditsResponseRemainsUnavailable(t *testing.T) {
 	body, err := hex.DecodeString("00000000300a2e12001a0022060880a6b6d2062a0608809bdbd2064212080212060880a6b6d2061a0608809bdbd206580162006801800000000f677270632d7374617475733a300d0a")
 	if err != nil {

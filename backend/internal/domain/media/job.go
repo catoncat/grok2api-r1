@@ -13,28 +13,28 @@ const (
 
 // Job 表示可跨进程重启恢复的异步视频任务。
 type Job struct {
-	ID              string
-	RequestID       string
-	ClientKeyID     uint64
-	ClientKeyName   string
-	AccountID       uint64
-	AccountName     string
-	EgressNodeID    *uint64
-	EgressNodeName  string
-	EgressScope     string
-	EgressMode      string
-	Provider        string
-	Model           string
-	ModelRouteID    uint64
-	UpstreamModel   string
-	Prompt          string
-	Seconds         int
-	Size            string
-	Quality         string
-	Status          Status
-	Progress        int
-	InputJSON       string
-	UpstreamURL     string
+	ID             string
+	RequestID      string
+	ClientKeyID    uint64
+	ClientKeyName  string
+	AccountID      uint64
+	AccountName    string
+	EgressNodeID   *uint64
+	EgressNodeName string
+	EgressScope    string
+	EgressMode     string
+	Provider       string
+	Model          string
+	ModelRouteID   uint64
+	UpstreamModel  string
+	Prompt         string
+	Seconds        int
+	Size           string
+	Quality        string
+	Status         Status
+	Progress       int
+	InputJSON      string
+	UpstreamURL    string
 	// ResultAssetID 指向本地媒体资产；XAI ZDR 上传完成后优先从此读取。
 	ResultAssetID   string
 	ContentType     string

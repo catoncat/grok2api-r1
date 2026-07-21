@@ -189,9 +189,9 @@ func TestSyncAccountNormalizesBuildVideo15ByBillingSuper(t *testing.T) {
 
 	const video15 = "grok-imagine-video-1.5"
 	buildAdapter := &buildCapabilityNormalizerAdapter{modelCapabilityAdapter: &modelCapabilityAdapter{models: map[uint64][]string{
-		superPrimary.ID:  {"grok-4.5"},
-		superFallback.ID: {"grok-4.5", video15, "grok-code-fast-1", video15},
-		freeAccount.ID:   {"grok-4.5", video15},
+		superPrimary.ID:   {"grok-4.5"},
+		superFallback.ID:  {"grok-4.5", video15, "grok-code-fast-1", video15},
+		freeAccount.ID:    {"grok-4.5", video15},
 		unknownAccount.ID: {video15, "grok-4.5"},
 	}}}
 	webAdapter := &modelCapabilityAdapter{provider: account.ProviderWeb, models: map[uint64][]string{

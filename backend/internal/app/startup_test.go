@@ -106,7 +106,6 @@ func TestReadinessRestoresPersistedCooldownWithoutUpstreamProbe(t *testing.T) {
 	}
 }
 
-
 func TestReadinessRejectsUnavailableMediaStoreWithoutLeakingError(t *testing.T) {
 	state := newStartupState(0)
 	state.setPhase("running")

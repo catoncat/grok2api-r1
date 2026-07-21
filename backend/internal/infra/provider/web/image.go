@@ -1428,21 +1428,26 @@ func (a *Adapter) imageResponse(ctx context.Context, credential account.Credenti
 }
 
 func (a *Adapter) imageDataItem(ctx context.Context, credential account.Credential, image imagineImageValue, format string) (map[string]any, error) {
-	if a.assets == nil {
-		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingStorage, fmt.Errorf("图片媒体存储未配置"))
-	}
 	raw, err := a.imageBytes(ctx, credential, image)
 	if err != nil {
 		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingDownload, err)
+	}
+	// b64_json 直接返回正文，不占用媒体存储（也不产生归档失败面）。
+	if format == "b64_json" {
+		mimeType, mimeErr := validatedImageMIME(raw, "")
+		if mimeErr != nil {
+			return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingDownload, mimeErr)
+		}
+		return map[string]any{"b64_json": base64.StdEncoding.EncodeToString(raw), "mime_type": mimeType, "revised_prompt": ""}, nil
+	}
+	if a.assets == nil {
+		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingStorage, fmt.Errorf("图片媒体存储未配置"))
 	}
 	asset, err := a.saveImageWithRetry(ctx, raw)
 	if err != nil {
 		return nil, provider.NewMediaPostProcessingError(provider.MediaPostProcessingStorage, err)
 	}
-	if format != "b64_json" {
-		return map[string]any{"url": a.assets.PublicImageURL(asset.ID), "mime_type": asset.MIMEType, "revised_prompt": ""}, nil
-	}
-	return map[string]any{"b64_json": base64.StdEncoding.EncodeToString(raw), "mime_type": asset.MIMEType, "revised_prompt": ""}, nil
+	return map[string]any{"url": a.assets.PublicImageURL(asset.ID), "mime_type": asset.MIMEType, "revised_prompt": ""}, nil
 }
 
 // saveImageWithRetry 只重试当前生成结果的本地持久化，不重新请求上游生成。
