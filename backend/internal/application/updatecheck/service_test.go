@@ -35,6 +35,17 @@ func TestCheckFindsLatestRelease(t *testing.T) {
 	}
 }
 
+func TestCheckTreatsForkBuildMetadataAsCurrent(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"tag_name":"v3.0.6","body":"Upstream release"}`)), Header: make(http.Header)}, nil
+	})}
+	service := NewService("v3.0.6+r1.1", client)
+	snapshot := service.Check(context.Background())
+	if snapshot.Status != StatusUpToDate || snapshot.UpdateAvailable || snapshot.CurrentVersion != "v3.0.6+r1.1" || snapshot.LatestVersion != "v3.0.6" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
 func TestCheckFailureKeepsLastSuccessfulRelease(t *testing.T) {
 	fail := false
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
