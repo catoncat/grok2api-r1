@@ -143,7 +143,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		cancel()
 		return nil, err
 	}
-	applyHeaders(upstream, token, lease)
+	applyHeaders(upstream, token, cfg.UserAgent, lease)
 	if request.Streaming {
 		upstream.Header.Set("Accept", "text/event-stream")
 	}

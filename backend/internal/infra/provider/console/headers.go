@@ -8,10 +8,13 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/browserheaders"
 )
 
-func applyHeaders(request *http.Request, token string, lease *infraegress.Lease) {
-	userAgent := strings.TrimSpace(lease.UserAgent)
+func applyHeaders(request *http.Request, token, configuredUserAgent string, lease *infraegress.Lease) {
+	userAgent := ""
+	if lease.NodeID != 0 {
+		userAgent = strings.TrimSpace(lease.UserAgent)
+	}
 	if userAgent == "" {
-		userAgent = infraegress.DefaultUserAgent
+		userAgent = strings.TrimSpace(configuredUserAgent)
 	}
 	request.Header.Set("Accept", "*/*")
 	request.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
