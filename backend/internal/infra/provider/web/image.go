@@ -29,13 +29,17 @@ import (
 
 const (
 	maxGeneratedImages            = 10
+	maxGeneratedImageBytes        = 32 << 20
 	mediaOutputAttempts           = 3
 	imageDownloadTimeout          = 60 * time.Second
 	imagineSelfUploadSource       = "IMAGINE_SELF_UPLOAD_FILE_SOURCE"
 	directFileUploadResponseLimit = 2 << 20
 )
 
-var errLiteImageReady = errors.New("Lite 图片已完成")
+var (
+	errLiteImageReady                = errors.New("Lite 图片已完成")
+	errInvalidGeneratedImageResponse = errors.New("上游图片响应无效")
+)
 
 type directFileUploadUnsupportedError struct{ statusCode int }
 
@@ -1649,6 +1653,49 @@ func imageAssetHeaders(token string, lease *egress.Lease) http.Header {
 	return headers
 }
 
+// newDirectImageClient 只用于生成资产直连下载：不继承宿主 HTTP_PROXY，
+// 重定向限 https + 可信资产 host，最多 5 跳（media.direct_session.first）。
+func newDirectImageClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Generated assets must not inherit HTTP_PROXY/HTTPS_PROXY from the host.
+	transport.Proxy = nil
+	return &http.Client{
+		Transport: transport,
+		Timeout:   90 * time.Second,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 5 || request.URL.Scheme != "https" || !trustedImageAssetHost(request.URL.Hostname()) {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+}
+
+// shouldFallbackDirectImage 只有 transport/401/403 才回退 Egress；404 与
+// 无效内容不重试，避免把上游确定性失败放大到住宅代理。
+func shouldFallbackDirectImage(status int, err error) bool {
+	return (err != nil && !errors.Is(err, errInvalidGeneratedImageResponse)) || status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+func readGeneratedImageResponse(response *http.Response) ([]byte, error) {
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("下载图片返回 %d", response.StatusCode)
+	}
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]))
+	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+		return nil, fmt.Errorf("%w: Content-Type %q", errInvalidGeneratedImageResponse, contentType)
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxGeneratedImageBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("图片下载失败: %w", err)
+	}
+	if len(raw) > maxGeneratedImageBytes {
+		return nil, fmt.Errorf("%w: 图片超过 32 MiB", errInvalidGeneratedImageResponse)
+	}
+	return raw, nil
+}
+
 func (a *Adapter) downloadImage(ctx context.Context, credential account.Credential, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme != "https" || !trustedImageAssetHost(parsed.Hostname()) || parsed.User != nil {
@@ -1658,12 +1705,26 @@ func (a *Adapter) downloadImage(ctx context.Context, credential account.Credenti
 	if err != nil {
 		return nil, err
 	}
+	raw, directStatus, directErr := a.downloadImageDirectAttempt(ctx, credential.ID, token, parsed.String())
+	if directErr == nil && directStatus >= 200 && directStatus < 300 {
+		a.log().Info("image_asset_download", "path", "direct_session", "host", parsed.Hostname(), "bytes", len(raw))
+		return raw, nil
+	}
+	if !shouldFallbackDirectImage(directStatus, directErr) {
+		if directErr != nil {
+			return nil, directErr
+		}
+		return nil, fmt.Errorf("直连下载图片返回 %d", directStatus)
+	}
+	a.log().Warn("image_asset_direct_fallback", "host", parsed.Hostname(), "status", directStatus, "error", directErr)
+
 	downloadCtx, cancel := context.WithTimeout(ctx, imageDownloadTimeout)
 	defer cancel()
 	var lastErr error
 	for attempt := 0; attempt < mediaOutputAttempts; attempt++ {
 		raw, retryable, attemptErr := a.downloadImageAttempt(downloadCtx, credential, token, parsed.String())
 		if attemptErr == nil {
+			a.log().Info("image_asset_download", "path", "egress_fallback", "host", parsed.Hostname(), "bytes", len(raw))
 			return raw, nil
 		}
 		lastErr = attemptErr
@@ -1677,6 +1738,38 @@ func (a *Adapter) downloadImage(ctx context.Context, credential account.Credenti
 	return nil, lastErr
 }
 
+// downloadImageDirectAttempt borrows only the selected session identity; image bytes use tc-sv direct transport.
+func (a *Adapter) downloadImageDirectAttempt(ctx context.Context, accountID uint64, token, rawURL string) ([]byte, int, error) {
+	lease, err := a.egress.Acquire(ctx, domainegress.ScopeWebAsset, fmt.Sprintf("%d", accountID))
+	if err != nil {
+		return nil, 0, err
+	}
+	defer lease.Release()
+	client := a.assetClient
+	if client == nil {
+		client = newDirectImageClient()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	request.Header = imageAssetHeaders(token, lease)
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, 0, err
+	}
+	status := response.StatusCode
+	if status < 200 || status >= 300 {
+		_ = response.Body.Close()
+		return nil, status, nil
+	}
+	raw, err := readGeneratedImageResponse(response)
+	if err != nil {
+		return nil, status, err
+	}
+	return raw, status, nil
+}
+
 // downloadImageAttempt 每次沿用同一账号，只允许出口管理器重新选择资源节点。
 func (a *Adapter) downloadImageAttempt(ctx context.Context, credential account.Credential, token, rawURL string) ([]byte, bool, error) {
 	lease, err := a.egress.AcquireCredential(ctx, domainegress.ScopeWebAsset, credential)
@@ -1688,8 +1781,7 @@ func (a *Adapter) downloadImageAttempt(ctx context.Context, credential account.C
 	if err != nil {
 		return nil, false, err
 	}
-	request.Header = buildHeaders(token, lease, "")
-	request.Header.Del("Content-Type")
+	request.Header = imageAssetHeaders(token, lease)
 	response, err := lease.Do(request)
 	if err != nil {
 		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
