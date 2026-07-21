@@ -2,6 +2,7 @@ package relational
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -94,7 +95,7 @@ func TestMigrateConsoleLegacyQuotaWindowPreservesActiveState(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	migrated, err := repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console", []string{"console:model-a", "console:model-b", "console:model-b"})
+	migrated, err := repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console", []string{"console:model-a", "console:model-b", "console:model-b"}, 1000)
 	if err != nil || migrated != 1 {
 		t.Fatalf("migration = %d, err = %v", migrated, err)
 	}
@@ -109,10 +110,10 @@ func TestMigrateConsoleLegacyQuotaWindowPreservesActiveState(t *testing.T) {
 	if len(byMode) != 2 || byMode["console:model-a"].Remaining != 3 || byMode["console:model-b"].Remaining != 7 {
 		t.Fatalf("migrated windows = %#v", byMode)
 	}
-	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console", []string{"console:model-a", "console:model-b"}); err != nil || migrated != 0 {
+	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console", []string{"console:model-a", "console:model-b"}, 1000); err != nil || migrated != 0 {
 		t.Fatalf("idempotent migration = %d, err = %v", migrated, err)
 	}
-	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console:model-a", []string{"console:model-b"}); err != nil || migrated != 1 {
+	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console:model-a", []string{"console:model-b"}, 1000); err != nil || migrated != 1 {
 		t.Fatalf("alias migration = %d, err = %v", migrated, err)
 	}
 	windows, err = repository.GetQuotaWindows(ctx, []uint64{credential.ID})
@@ -126,7 +127,7 @@ func TestMigrateConsoleLegacyQuotaWindowPreservesActiveState(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console:model-a", []string{"console:model-b"}); err != nil || migrated != 1 {
+	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console:model-a", []string{"console:model-b"}, 1000); err != nil || migrated != 1 {
 		t.Fatalf("less restrictive alias migration = %d, err = %v", migrated, err)
 	}
 	windows, err = repository.GetQuotaWindows(ctx, []uint64{credential.ID})
@@ -141,12 +142,56 @@ func TestMigrateConsoleLegacyQuotaWindowPreservesActiveState(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console:model-a", []string{"console:model-b"}); err != nil || migrated != 1 {
+	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console:model-a", []string{"console:model-b"}, 1000); err != nil || migrated != 1 {
 		t.Fatalf("exhausted alias migration = %d, err = %v", migrated, err)
 	}
 	windows, err = repository.GetQuotaWindows(ctx, []uint64{credential.ID})
 	merged := windows[credential.ID]
 	if err != nil || len(merged) != 1 || merged[0].Remaining != 0 || merged[0].ResetAt == nil || !merged[0].ResetAt.Equal(laterReset) || merged[0].Source != account.QuotaSourceUpstream {
 		t.Fatalf("exhausted alias state was lost = %#v, err = %v", windows, err)
+	}
+}
+
+func TestMigrateQuotaModeHonorsBatchLimit(t *testing.T) {
+	ctx := context.Background()
+	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "console-quota-batch.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repository := NewAccountRepository(database)
+	now := time.Now().UTC()
+	for index := range 3 {
+		credential, _, err := repository.UpsertByIdentity(ctx, account.Credential{
+			Provider: account.ProviderConsole, AuthType: account.AuthTypeSSO,
+			Name: fmt.Sprintf("console-%d", index), SourceKey: fmt.Sprintf("console:batch:%d", index),
+			EncryptedAccessToken: "encrypted", Enabled: true, AuthStatus: account.AuthStatusActive, MaxConcurrent: 1,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.SaveQuotaWindows(ctx, credential.ID, "", now, []account.QuotaWindow{{
+			AccountID: credential.ID, Mode: "console", Remaining: 20, Total: 20,
+			WindowSeconds: 3600, Source: account.QuotaSourceDefault, UpdatedAt: now,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	migrated, err := repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console", []string{"console:model"}, 2)
+	if err != nil || migrated != 2 {
+		t.Fatalf("first migration = %d, err = %v", migrated, err)
+	}
+	var legacy int64
+	if err := database.db.WithContext(ctx).Model(&quotaWindowModel{}).Where("mode = ?", "console").Count(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if legacy != 1 {
+		t.Fatalf("legacy windows after bounded migration = %d, want 1", legacy)
+	}
+	if migrated, err = repository.MigrateQuotaMode(ctx, account.ProviderConsole, "console", []string{"console:model"}, 2); err != nil || migrated != 1 {
+		t.Fatalf("second migration = %d, err = %v", migrated, err)
 	}
 }

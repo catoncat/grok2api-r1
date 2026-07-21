@@ -1540,7 +1540,7 @@ func (r *AccountRepository) HasQuotaWindows(ctx context.Context, accountID uint6
 // MigrateQuotaMode replaces one legacy window with canonical model windows.
 // Collisions merge conservatively, so reruns are idempotent and never relax an
 // already observed limit.
-func (r *AccountRepository) MigrateQuotaMode(ctx context.Context, providerValue account.Provider, legacyMode string, replacements []string) (int64, error) {
+func (r *AccountRepository) MigrateQuotaMode(ctx context.Context, providerValue account.Provider, legacyMode string, replacements []string, limit int) (int64, error) {
 	legacyMode = strings.TrimSpace(legacyMode)
 	seen := make(map[string]struct{}, len(replacements))
 	modes := make([]string, 0, len(replacements))
@@ -1558,12 +1558,17 @@ func (r *AccountRepository) MigrateQuotaMode(ctx context.Context, providerValue 
 	if !providerValue.IsValid() || legacyMode == "" || len(modes) == 0 {
 		return 0, nil
 	}
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
 	var migrated int64
 	err := r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var legacy []quotaWindowModel
 		if err := tx.Model(&quotaWindowModel{}).
 			Joins("JOIN provider_accounts AS account ON account.id = account_quota_windows.account_id").
 			Where("account.provider = ? AND account_quota_windows.mode = ?", providerValue, legacyMode).
+			Order("account_quota_windows.account_id ASC").
+			Limit(limit).
 			Find(&legacy).Error; err != nil {
 			return err
 		}

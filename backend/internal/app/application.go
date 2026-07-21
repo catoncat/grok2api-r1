@@ -43,6 +43,11 @@ import (
 	httpmiddleware "github.com/chenyme/grok2api/backend/internal/transport/http/middleware"
 )
 
+const (
+	startupQuotaMigrationLimit = 1000
+	startupQuotaRecoveryLimit  = 1000
+)
+
 // Application 管理后端进程生命周期和本地后台任务。
 type Application struct {
 	logger          *slog.Logger
@@ -217,10 +222,10 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return nil, fmt.Errorf("校验 Provider 注册表: %w", err)
 	}
 	consoleQuotaModes := consoleprovider.QuotaModes()
-	migratedConsoleQuotaWindows, err := accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console", consoleQuotaModes)
+	migratedConsoleQuotaWindows, err := accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console", consoleQuotaModes, startupQuotaMigrationLimit)
 	if err == nil {
 		var aliases int64
-		aliases, err = accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console:grok-4.20-0309", []string{"console:grok-4.20-0309-reasoning"})
+		aliases, err = accountRepo.MigrateQuotaMode(ctx, account.ProviderConsole, "console:grok-4.20-0309", []string{"console:grok-4.20-0309-reasoning"}, startupQuotaMigrationLimit)
 		migratedConsoleQuotaWindows += aliases
 	}
 	if err != nil {
@@ -255,7 +260,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	accountService.SetLogger(logger)
 	accountService.SetQuotaRecoveryQueue(quotaQueue)
 	accountService.SetTaskPools(conversionPool, syncPool, refreshPool)
-	windows, err := accountRepo.ListQuotaRecoveryWindows(ctx, 100000)
+	windows, err := accountRepo.ListQuotaRecoveryWindows(ctx, startupQuotaRecoveryLimit)
 	if err != nil {
 		if runtimeStore != nil {
 			_ = runtimeStore.Close()

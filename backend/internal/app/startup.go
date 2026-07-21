@@ -14,14 +14,13 @@ import (
 )
 
 const (
-	startupRecoveryBudget    = 20 * time.Second
-	startupCriticalWindow    = 2 * time.Minute
-	startupCriticalLimit     = 100
-	statsigWarmupInterval    = 15 * time.Minute
-	webQuotaStaleAfter       = 30 * time.Minute
-	webQuotaCatchupEvery     = 30 * time.Minute
-	modelCatalogStaleAfter   = 24 * time.Hour
-	modelCatalogCatchupEvery = 6 * time.Hour
+	startupRecoveryBudget     = 20 * time.Second
+	startupCriticalWindow     = 2 * time.Minute
+	startupCriticalLimit      = 100
+	statsigWarmupInterval     = 15 * time.Minute
+	statsigWarmupAccountLimit = 3
+	modelCatalogStaleAfter    = 24 * time.Hour
+	modelCatalogCatchupEvery  = 6 * time.Hour
 )
 
 type startupReport struct {
@@ -168,23 +167,17 @@ func readinessSnapshot(
 	required := make(map[accountdomain.Provider]bool, 3)
 	usable := make(map[accountdomain.Provider]bool, 3)
 	providerErrors := make(map[accountdomain.Provider]bool, 3)
-	now := time.Now().UTC()
 	for _, route := range routes {
 		required[route.Provider] = true
-		if usable[route.Provider] || route.SupportedAccounts == 0 {
+		if route.SupportedAccounts == 0 || usable[route.Provider] || providerErrors[route.Provider] {
 			continue
 		}
-		candidates, listErr := accounts.ListRoutingCandidates(ctx, route.Provider, route.UpstreamModel, providers.QuotaMode(route.Provider, route.UpstreamModel))
-		if listErr != nil {
+		available, activeErr := accounts.HasActive(ctx, route.Provider, route.UpstreamModel, providers.QuotaMode(route.Provider, route.UpstreamModel))
+		if activeErr != nil {
 			providerErrors[route.Provider] = true
 			continue
 		}
-		for _, candidate := range candidates {
-			if startupCandidateUsable(candidate, now, providers) {
-				usable[route.Provider] = true
-				break
-			}
-		}
+		usable[route.Provider] = available
 	}
 
 	readyProviders := 0
@@ -254,36 +247,6 @@ func newReadinessStartupReport(report startupReport) *httpserver.ReadinessStartu
 	}
 }
 
-func startupCandidateUsable(candidate accountdomain.RoutingCandidate, now time.Time, providers *provider.Registry) bool {
-	credential := candidate.Credential
-	if credential.EncryptedAccessToken == "" || credential.AuthStatus != accountdomain.AuthStatusActive {
-		return false
-	}
-	refreshable := credential.AuthType == accountdomain.AuthTypeOAuth
-	if providers != nil {
-		refreshable = providers.SupportsCredentialRefresh(credential.Provider)
-	}
-	if refreshable && !credential.ExpiresAt.IsZero() && !now.Before(credential.ExpiresAt) {
-		return false
-	}
-	if credential.CooldownUntil != nil && now.Before(*credential.CooldownUntil) {
-		return false
-	}
-	if candidate.ModelCapabilityKnown && !candidate.SupportsModel {
-		return false
-	}
-	if candidate.ModelQuotaBlock != nil && now.Before(candidate.ModelQuotaBlock.CooldownUntil) {
-		return false
-	}
-	if candidate.QuotaRecovery != nil && candidate.QuotaRecovery.Status != accountdomain.QuotaRecoveryStatusActive {
-		return false
-	}
-	if candidate.Billing != nil && candidate.Billing.IsExhausted(credential.MinimumRemaining) {
-		return false
-	}
-	return candidate.QuotaWindow == nil || candidate.QuotaWindow.Remaining > 0
-}
-
 func (a *Application) reconcileStartup(ctx context.Context) {
 	a.startup.setPhase("reconciling")
 	recoveryCtx, cancel := context.WithTimeout(ctx, startupRecoveryBudget)
@@ -335,17 +298,17 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		a.startup.setStatsig("warming", "正在预热共享签名", 0)
+		a.startup.setStatsig("warming", "正在预热 Statsig meta", 0)
 		values, err := a.accountRepo.ListEnabled(ctx, accountdomain.ProviderWeb)
 		if err == nil && len(values) == 0 {
 			a.startup.setStatsig("disabled", "没有启用的 Grok Web 账号", 0)
 		} else if err == nil {
 			warmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			var warmed int
-			warmed, err = a.web.WarmStatsig(warmCtx, values[0])
+			warmed, err = warmStatsigFromAccounts(warmCtx, values, a.web.WarmStatsig)
 			cancel()
 			if err == nil {
-				a.startup.setStatsig("warm", "共享签名已预热", warmed)
+				a.startup.setStatsig("warm", "Statsig meta 已预热", warmed)
 			}
 		}
 		if err != nil && ctx.Err() == nil {
@@ -356,47 +319,20 @@ func (a *Application) runStatsigWarmup(ctx context.Context) {
 	}
 }
 
-func (a *Application) queueDueWebQuotaRefresh(ctx context.Context) {
-	windows, err := a.accounts.ListDueWebQuotaWindows(ctx, time.Now().UTC(), 1000)
-	if err != nil {
-		a.logger.Warn("web_quota_startup_catchup_failed", "error", err)
-		a.startup.recordError(err)
-		return
-	}
-	for _, window := range windows {
-		a.accounts.QueueWebQuotaRefresh(window.AccountID, window.Mode)
-	}
-	a.startup.updateReport(func(report *startupReport) { report.DueWebQuotasQueued = len(windows) })
-	if len(windows) > 0 {
-		a.logger.Info("web_quota_startup_catchup_queued", "count", len(windows))
-	}
-}
-
-func (a *Application) runWebQuotaCatchup(ctx context.Context) {
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
+func warmStatsigFromAccounts(ctx context.Context, values []accountdomain.Credential, warm func(context.Context, accountdomain.Credential) (int, error)) (int, error) {
+	limit := min(len(values), statsigWarmupAccountLimit)
+	var lastErr error
+	for index := range limit {
+		warmed, err := warm(ctx, values[index])
+		if err == nil {
+			return warmed, nil
 		}
-		ids, err := a.accountRepo.ListStaleWebQuotaAccountIDs(ctx, time.Now().UTC().Add(-webQuotaStaleAfter), 100)
-		if err == nil && len(ids) > 0 {
-			runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-			var succeeded int
-			succeeded, _, err = a.accounts.SyncWebQuotaAccounts(runCtx, ids)
-			cancel()
-			a.startup.updateReport(func(report *startupReport) {
-				report.StaleWebQuotasFound = len(ids)
-				report.StaleWebQuotasSynced = succeeded
-			})
+		lastErr = err
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
 		}
-		if err != nil && ctx.Err() == nil {
-			a.logger.Warn("web_quota_stale_catchup_failed", "error", err)
-		}
-		resetTimer(timer, webQuotaCatchupEvery)
 	}
+	return 0, lastErr
 }
 
 func (a *Application) runModelCatalogCatchup(ctx context.Context) {
