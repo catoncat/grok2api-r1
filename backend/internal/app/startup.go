@@ -113,6 +113,7 @@ func readinessSnapshot(
 	ctx context.Context,
 	state *startupState,
 	runtimeHealth func(context.Context) error,
+	mediaHealth func(context.Context) error,
 	models repository.ModelRepository,
 	accounts repository.AccountRepository,
 	providers *provider.Registry,
@@ -122,6 +123,7 @@ func readinessSnapshot(
 		Ready: false, State: phase, UpdatedAt: updatedAt, Startup: newReadinessStartupReport(report),
 		Components: map[string]httpserver.ReadinessComponent{
 			"runtime_store": {State: "unknown"},
+			"media_store":   {State: "unknown"},
 			"grok_build":    {State: "unknown"},
 			"grok_web":      {State: "unknown"},
 			"statsig":       statsig,
@@ -139,6 +141,16 @@ func readinessSnapshot(
 		return snapshot
 	}
 	snapshot.Components["runtime_store"] = httpserver.ReadinessComponent{State: "ready"}
+	healthCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+	err = mediaHealth(healthCtx)
+	cancel()
+	if err != nil {
+		snapshot.State = "not_ready"
+		// 固定文案，不泄露 S3/COS 错误原文（startup.media_readiness_no_leak）
+		snapshot.Components["media_store"] = httpserver.ReadinessComponent{State: "unavailable", Detail: "媒体存储不可用"}
+		return snapshot
+	}
+	snapshot.Components["media_store"] = httpserver.ReadinessComponent{State: "ready"}
 
 	routes, err := models.ListConfiguredEnabled(ctx)
 	if err != nil {
