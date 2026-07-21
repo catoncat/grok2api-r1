@@ -21,6 +21,7 @@ type UpstreamFailure struct {
 	AccountName            string
 	AccountScoped          bool
 	PermanentAccountDenial bool
+	ModelPermissionDenied  bool
 	QuotaExhausted         bool
 	FreeQuotaExhausted     bool
 	ModelQuotaExhausted    bool
@@ -108,6 +109,7 @@ func newHTTPUpstreamFailure(status int, body []byte, accountID uint64, accountNa
 		failure.Code = "upstream_forbidden"
 		failure.PublicMessage = "上游拒绝了该请求"
 		failure.PermanentAccountDenial = isPermanentAccountDenial(metadataText)
+		failure.ModelPermissionDenied = isModelPermissionDenial(upstreamCode, metadataText)
 		failure.ModelQuotaExhausted = isModelQuotaExhaustion(metadataText)
 		failure.FreeQuotaExhausted = failure.ModelQuotaExhausted || isFreeQuotaExhaustion(metadataText)
 		failure.QuotaExhausted = failure.FreeQuotaExhausted || isPaidQuotaExhaustion(metadataText)
@@ -181,6 +183,15 @@ func isPermanentAccountDenial(text string) bool {
 		return true
 	}
 	return strings.Trim(strings.TrimSpace(text), " .!\t\r\n") == "access denied"
+}
+
+// isModelPermissionDenial 只覆盖明确的 chat endpoint 权限拒绝：错误码缺失或为
+// permission_denied（含连字符变体）。区域、策略、凭据或 Egress 403 不在此类。
+func isModelPermissionDenial(upstreamCode, text string) bool {
+	if !strings.Contains(text, "access to the chat endpoint is denied") {
+		return false
+	}
+	return upstreamCode == "" || normalizeFailureCode(upstreamCode) == "permission_denied"
 }
 
 func isPaidQuotaExhaustion(text string) bool {
