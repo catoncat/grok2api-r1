@@ -1,0 +1,41 @@
+backend/internal/infra/provider/provider.go
+  s_8eb1d458b8bf05::t_9311b3cb076d73 121-126
+backend/internal/infra/config/config_test.go
+  s_8eb1d458b8bf05::t_280ee5a0947fec 67,73
+backend/internal/transport/http/inference/handler.go
+  s_8eb1d458b8bf05::t_0f73f71b270285 14,33-37,761-763,779-782,876-878,898-1006
+  s_8eb1d458b8bf05::t_233c1407211234 199,240,667
+  s_8eb1d458b8bf05::t_9b26268a955318 38-40,1007
+backend/internal/application/gateway/service.go
+  s_8eb1d458b8bf05::t_da078c940067ca 60-62,562
+  s_8eb1d458b8bf05::t_a4d49080c6059a 80-92,558,561,892-894,896
+backend/internal/application/gateway/attempt.go
+  s_8eb1d458b8bf05::t_c706888bea3eb4 149-172
+backend/internal/transport/http/inference/handler_test.go
+  s_8eb1d458b8bf05::t_d5c9940bf5f8ce 12
+  s_8eb1d458b8bf05::t_56150012d21089 321-343
+backend/internal/infra/config/config.go
+  s_8eb1d458b8bf05::t_7d86612d1a2091 24-25
+backend/internal/infra/provider/cli/adapter_test.go
+  s_8eb1d458b8bf05::t_b86e9728356573 55,86
+  s_8eb1d458b8bf05::t_7a6d51e7d74930 269-288
+backend/internal/infra/provider/cli/adapter.go
+  s_8eb1d458b8bf05::t_a7ca94c16aa32f 127,417,447-470
+  s_8eb1d458b8bf05::t_7f03d186057dc5 471
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "9d44cce164853c0e8bded30a4c996016a301494d",
+  "prompts": {},
+  "sessions": {
+    "s_8eb1d458b8bf05": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8260-c3bc-76d6-99f9-88915a9a8818",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
