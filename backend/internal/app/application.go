@@ -45,26 +45,27 @@ import (
 
 // Application 管理后端进程生命周期和本地后台任务。
 type Application struct {
-	logger        *slog.Logger
-	database      *relational.Database
-	server        *http.Server
-	audits        *auditapp.Service
-	responses     repository.ResponseRepository
-	runtime       io.Closer
-	settingsBus   repository.SettingsChangeBus
-	settings      *settingsapp.Service
-	gateway       *gateway.Service
-	media         *mediaapp.Service
-	quotaRecovery *quotarecoveryapp.Service
-	accounts      *accountapp.Service
-	models        *modelapp.Service
-	clientKeys    *clientkeyapp.Service
-	updates       *updatecheckapp.Service
-	accountRepo   repository.AccountRepository
-	modelRepo     repository.ModelRepository
-	providers     *provider.Registry
-	web           *webprovider.Adapter
-	startup       *startupState
+	logger          *slog.Logger
+	database        *relational.Database
+	server          *http.Server
+	audits          *auditapp.Service
+	responses       repository.ResponseRepository
+	runtime         io.Closer
+	settingsBus     repository.SettingsChangeBus
+	settings        *settingsapp.Service
+	gateway         *gateway.Service
+	media           *mediaapp.Service
+	quotaRecovery   *quotarecoveryapp.Service
+	accounts        *accountapp.Service
+	models          *modelapp.Service
+	clientKeys      *clientkeyapp.Service
+	updates         *updatecheckapp.Service
+	accountRepo     repository.AccountRepository
+	startupAccounts startupAccountRepository
+	modelRepo       repository.ModelRepository
+	providers       *provider.Registry
+	web             *webprovider.Adapter
+	startup         *startupState
 }
 
 // New 完成数据库、Provider、应用服务和 HTTP 路由装配。
@@ -353,7 +354,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		logger: logger, database: database, server: server,
 		audits: auditService, responses: responseRepo, runtime: runtimeStore,
 		settingsBus: settingsBus, settings: settingsService, gateway: gatewayService, media: mediaService, quotaRecovery: quotaRecoveryService, accounts: accountService, models: modelService, clientKeys: clientKeyService, updates: updateService,
-		accountRepo: accountRepo, modelRepo: modelRepo, providers: providers, web: webAdapter, startup: startup,
+		accountRepo: accountRepo, startupAccounts: accountRepo, modelRepo: modelRepo, providers: providers, web: webAdapter, startup: startup,
 	}, nil
 }
 

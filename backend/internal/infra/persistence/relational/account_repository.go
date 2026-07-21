@@ -276,9 +276,28 @@ func (r *AccountRepository) ListRoutingCandidates(ctx context.Context, provider 
 }
 
 func (r *AccountRepository) ListEnabled(ctx context.Context, provider account.Provider) ([]account.Credential, error) {
+	return r.listEnabled(ctx, provider, 0)
+}
+
+// ListEnabledBatch returns a stable, bounded prefix for startup maintenance.
+func (r *AccountRepository) ListEnabledBatch(ctx context.Context, provider account.Provider, limit int) ([]account.Credential, error) {
+	if limit < 1 {
+		return []account.Credential{}, nil
+	}
+	return r.listEnabled(ctx, provider, limit)
+}
+
+func (r *AccountRepository) listEnabled(ctx context.Context, provider account.Provider, limit int) ([]account.Credential, error) {
 	var rows []accountModel
-	err := r.db.db.WithContext(ctx).Preload("Credential").Preload("WebProfile").Where("provider = ? AND enabled = ? AND auth_status = ?", provider, true, account.AuthStatusActive).Order("priority DESC, id ASC").Find(&rows).Error
-	if err != nil {
+	query := r.db.db.WithContext(ctx).
+		Preload("Credential").
+		Preload("WebProfile").
+		Where("provider = ? AND enabled = ? AND auth_status = ?", provider, true, account.AuthStatusActive).
+		Order("priority DESC, id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]account.Credential, 0, len(rows))
@@ -289,6 +308,15 @@ func (r *AccountRepository) ListEnabled(ctx context.Context, provider account.Pr
 		return nil, err
 	}
 	return out, nil
+}
+
+// CountActiveCooldowns counts startup-visible account cooldowns without loading credentials.
+func (r *AccountRepository) CountActiveCooldowns(ctx context.Context, now time.Time) (int64, error) {
+	var count int64
+	err := r.db.db.WithContext(ctx).Model(&accountModel{}).
+		Where("enabled = ? AND auth_status = ? AND cooldown_until > ?", true, account.AuthStatusActive, now.UTC()).
+		Count(&count).Error
+	return count, err
 }
 
 func (r *AccountRepository) ListEnabledAccountIDs(ctx context.Context, provider account.Provider, refreshableOnly bool) ([]uint64, error) {
