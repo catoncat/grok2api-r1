@@ -41,37 +41,10 @@ const availableRoutePredicate = `
 	)
 `
 
-// Build Super 共享能力：Billing paid 或 build_super_entitled；仅 grok_build。
-const modelAccountBuildSuperPredicate = `(EXISTS (SELECT 1 FROM account_billing_snapshots billing WHERE billing.account_id = account.id AND ` + accountPaidBillingSignals + `) OR (account.provider = 'grok_build' AND account.build_super_entitled = TRUE))`
-const modelPeerBuildSuperPredicate = `(EXISTS (SELECT 1 FROM account_billing_snapshots billing WHERE billing.account_id = peer.id AND ` + accountPaidBillingSignals + `) OR (peer.provider = 'grok_build' AND peer.build_super_entitled = TRUE))`
-
-const modelSharedPaidBuildSupportSortExpression = `(model_routes.provider = 'grok_build'
-	AND ` + modelAccountBuildSuperPredicate + `
-	AND EXISTS (
-		SELECT 1
-		FROM provider_accounts peer
-		JOIN account_model_capabilities peer_capability ON peer_capability.account_id = peer.id AND peer_capability.upstream_model = model_routes.upstream_model
-		WHERE peer.provider = model_routes.provider
-			AND peer.enabled = TRUE
-			AND peer.auth_status = 'active'
-			AND ` + modelPeerBuildSuperPredicate + `
-	))`
-
-const modelSharedPaidBuildSupportAvailabilityExpression = `(route.provider = 'grok_build'
-	AND ` + modelAccountBuildSuperPredicate + `
-	AND EXISTS (
-		SELECT 1
-		FROM provider_accounts peer
-		JOIN account_model_capabilities peer_capability ON peer_capability.account_id = peer.id AND peer_capability.upstream_model = route.upstream_model
-		WHERE peer.provider = route.provider
-			AND peer.enabled = TRUE
-			AND peer.auth_status = 'active'
-			AND ` + modelPeerBuildSuperPredicate + `
-	))`
-
+// Build 选路只认真实能力与 verified 绑定：Billing paid/Super 共享推断不授权（用户决策 Q2）。
 const (
 	modelProviderPriorityExpression = "CASE model_routes.provider WHEN 'grok_build' THEN 0 WHEN 'grok_web' THEN 1 WHEN 'grok_console' THEN 2 ELSE 3 END"
-	modelSupportSortExpression      = `(SELECT COUNT(*) FROM provider_accounts account WHERE account.provider = model_routes.provider AND account.enabled = TRUE AND account.auth_status = 'active' AND (EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id AND binding.account_id = account.id) OR (NOT EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id) AND (EXISTS (SELECT 1 FROM account_model_capabilities capability WHERE capability.account_id = account.id AND capability.upstream_model = model_routes.upstream_model) OR ` + modelSharedPaidBuildSupportSortExpression + `))))`
+	modelSupportSortExpression      = `(SELECT COUNT(*) FROM provider_accounts account WHERE account.provider = model_routes.provider AND account.enabled = TRUE AND account.auth_status = 'active' AND (EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id AND binding.account_id = account.id) OR (NOT EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id) AND EXISTS (SELECT 1 FROM account_model_capabilities capability WHERE capability.account_id = account.id AND capability.upstream_model = model_routes.upstream_model))))`
 	modelSyncedSortExpression       = `(SELECT MAX(sync.last_success_at) FROM provider_accounts account JOIN account_model_sync_states sync ON sync.account_id = account.id WHERE account.provider = model_routes.provider AND account.enabled = TRUE AND account.auth_status = 'active')`
 )
 
@@ -571,6 +544,25 @@ func (r *ModelRepository) Update(ctx context.Context, value model.Route, account
 	return r.Get(ctx, value.ID)
 }
 
+func (r *ModelRepository) AddAccountBinding(ctx context.Context, providerValue account.Provider, upstreamModel string, accountID uint64) error {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if !providerValue.IsValid() || upstreamModel == "" || accountID == 0 {
+		return fmt.Errorf("模型账号绑定参数无效")
+	}
+	return r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var route modelRouteModel
+		if err := tx.Where("provider = ? AND upstream_model = ? AND enabled = ?", providerValue, upstreamModel, true).First(&route).Error; err != nil {
+			return mapError(err)
+		}
+		var boundAccount accountModel
+		if err := tx.Where("id = ? AND provider = ?", accountID, providerValue).First(&boundAccount).Error; err != nil {
+			return mapError(err)
+		}
+		row := modelRouteAccountModel{ModelRouteID: route.ID, AccountID: boundAccount.ID}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
+	})
+}
+
 func (r *ModelRepository) Delete(ctx context.Context, id uint64) error {
 	result := r.db.db.WithContext(ctx).Delete(&modelRouteModel{}, id)
 	if result.Error != nil {
@@ -640,7 +632,7 @@ func (r *ModelRepository) annotateAvailability(ctx context.Context, values []mod
 		SELECT route.id AS route_id,
 			CASE WHEN COUNT(DISTINCT binding.account_id) > 0
 				THEN COUNT(DISTINCT CASE WHEN account.enabled = TRUE AND account.auth_status = ? AND binding.account_id IS NOT NULL THEN account.id END)
-				ELSE COUNT(DISTINCT CASE WHEN account.enabled = TRUE AND account.auth_status = ? AND (capability.account_id IS NOT NULL OR `+modelSharedPaidBuildSupportAvailabilityExpression+`) THEN account.id END)
+				ELSE COUNT(DISTINCT CASE WHEN account.enabled = TRUE AND account.auth_status = ? AND capability.account_id IS NOT NULL THEN account.id END)
 			END AS supported_accounts,
 			CASE WHEN COUNT(DISTINCT binding.account_id) > 0
 				THEN COUNT(DISTINCT CASE WHEN account.enabled = TRUE AND account.auth_status = ? AND binding.account_id IS NOT NULL AND sync.last_success_at IS NOT NULL THEN account.id END)

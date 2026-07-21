@@ -28,5 +28,8 @@ type ModelRepository interface {
 	Update(ctx context.Context, value model.Route, accountIDs *[]uint64) (model.Route, error)
 	Delete(ctx context.Context, id uint64) error
 	DeleteMany(ctx context.Context, ids []uint64) (int64, error)
+	// AddAccountBinding 追加一条模型路由账号绑定（append-only、幂等）；
+	// 只有真实 HTTP 200 验权探针才会调用（model.verified_binding.http200_only）。
+	AddAccountBinding(ctx context.Context, provider account.Provider, upstreamModel string, accountID uint64) error
 	UpdateManyEnabled(ctx context.Context, ids []uint64, enabled bool) (int64, error)
 }

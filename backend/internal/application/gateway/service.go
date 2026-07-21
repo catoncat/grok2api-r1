@@ -45,6 +45,8 @@ const finalizationTimeout = 5 * time.Second
 const textBillingReservationTTL = 2 * time.Hour
 const mediaBillingReservationTTL = 24 * time.Hour
 const modelCatalogRefreshTimeout = 30 * time.Second
+const buildModelVerificationConcurrency = 4
+const buildModelVerificationTimeout = 30 * time.Second
 
 var freeQuotaUsagePattern = regexp.MustCompile(`(?i)tokens\s*\(actual/limit\)\s*:\s*([0-9]+)\s*/\s*([0-9]+)`)
 
@@ -112,33 +114,38 @@ type videoAssetStore interface {
 	OpenVideo(ctx context.Context, id string) (mediadomain.Asset, io.ReadCloser, error)
 }
 
+type routeAccountBinder interface {
+	AddAccountBinding(ctx context.Context, providerValue accountdomain.Provider, upstreamModel string, accountID uint64) error
+}
+
 type accountModelSyncer interface {
 	SyncAccount(ctx context.Context, accountID uint64) (int, error)
 }
 
 // Service handles model routing, account selection, failover, and audit finalization.
 type Service struct {
-	models         routeResolver
-	audits         auditRecorder
-	accounts       *accountapp.Service
-	clientKeys     *clientkeyapp.Service
-	providers      *provider.Registry
-	selector       *Selector
-	responses      repository.ResponseRepository
-	maxAttempts    atomic.Int64
-	mediaJobs      repository.MediaJobRepository
-	mediaAssets    videoAssetStore
-	mediaQueue     chan string
-	mediaMu        sync.Mutex
-	mediaQueued    map[string]struct{}
-	mediaWorker    int
-	mediaQueueFull atomic.Uint64
-	logger         *slog.Logger
-	rateLimitMu    sync.Mutex
-	rateLimits     map[string]teamModelRateLimit
-	rateLimitTeams map[uint64]string
-	modelSyncMu    sync.Mutex
-	modelSyncing   map[uint64]struct{}
+	models                      routeResolver
+	audits                      auditRecorder
+	accounts                    *accountapp.Service
+	clientKeys                  *clientkeyapp.Service
+	providers                   *provider.Registry
+	selector                    *Selector
+	responses                   repository.ResponseRepository
+	maxAttempts                 atomic.Int64
+	mediaJobs                   repository.MediaJobRepository
+	mediaAssets                 videoAssetStore
+	mediaQueue                  chan string
+	mediaMu                     sync.Mutex
+	mediaQueued                 map[string]struct{}
+	mediaWorker                 int
+	mediaQueueFull              atomic.Uint64
+	logger                      *slog.Logger
+	rateLimitMu                 sync.Mutex
+	rateLimits                  map[string]teamModelRateLimit
+	rateLimitTeams              map[uint64]string
+	modelSyncMu                 sync.Mutex
+	modelSyncing                map[uint64]struct{}
+	buildModelVerificationSlots chan struct{}
 }
 
 type teamModelRateLimit struct {
@@ -166,10 +173,80 @@ func NewService(models routeResolver, audits auditRecorder, accounts *accountapp
 		models: models, audits: audits, accounts: accounts, clientKeys: clientKeys, providers: providers,
 		selector: selector, responses: responses, logger: slog.Default(),
 		rateLimits: make(map[string]teamModelRateLimit), rateLimitTeams: make(map[uint64]string),
-		modelSyncing: make(map[uint64]struct{}),
+		modelSyncing: make(map[uint64]struct{}), buildModelVerificationSlots: make(chan struct{}, buildModelVerificationConcurrency),
 	}
 	service.UpdateMaxAttempts(maxAttempts)
 	return service
+}
+
+func (s *Service) VerifyBuildModel(ctx context.Context, accountID uint64, upstreamModel string) error {
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if accountID == 0 || upstreamModel == "" {
+		return fmt.Errorf("Build 模型探针参数无效")
+	}
+	if s.accounts == nil || s.providers == nil || s.buildModelVerificationSlots == nil {
+		return fmt.Errorf("Build 模型探针未配置")
+	}
+	select {
+	case s.buildModelVerificationSlots <- struct{}{}:
+		defer func() { <-s.buildModelVerificationSlots }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	verificationCtx, cancel := context.WithTimeout(ctx, buildModelVerificationTimeout)
+	defer cancel()
+	view, err := s.accounts.Get(verificationCtx, accountID)
+	if err != nil {
+		return fmt.Errorf("读取 Build 探针账号: %w", err)
+	}
+	credential := view.Credential
+	if credential.ID != accountID || credential.Provider != accountdomain.ProviderBuild {
+		return fmt.Errorf("Build 模型探针账号来源无效")
+	}
+	adapter, ok := s.providers.Responses(accountdomain.ProviderBuild)
+	if !ok {
+		return fmt.Errorf("Build Responses 适配器未注册")
+	}
+	body, err := json.Marshal(map[string]any{
+		"model": upstreamModel,
+		"input": "Reply with exactly: pong",
+		"store": false,
+	})
+	if err != nil {
+		return fmt.Errorf("构造 Build 模型探针: %w", err)
+	}
+	response, err := adapter.ForwardResponse(verificationCtx, provider.ResponseResourceRequest{
+		Credential: credential, Method: http.MethodPost, Path: "/responses", Model: upstreamModel,
+		Body: body, Streaming: false, NormalizeBody: true, Operation: string(audit.OperationResponses),
+	})
+	if err != nil {
+		return newTransportUpstreamFailure(err, credential.ID, credential.Name)
+	}
+	if response == nil {
+		return fmt.Errorf("Build 模型探针返回空响应")
+	}
+	diagnosticBody, err := readRetryableBody(response.Body)
+	if err != nil {
+		return fmt.Errorf("读取 Build 模型探针响应: %w", err)
+	}
+	if response.StatusCode == http.StatusOK {
+		binder, ok := s.models.(routeAccountBinder)
+		if !ok {
+			return fmt.Errorf("模型路由不支持追加账号绑定")
+		}
+		return binder.AddAccountBinding(verificationCtx, accountdomain.ProviderBuild, upstreamModel, credential.ID)
+	}
+	failure := newHTTPUpstreamFailure(response.StatusCode, diagnosticBody, credential.ID, credential.Name)
+	if response.StatusCode == http.StatusForbidden && failure.ModelPermissionDenied && s.selector != nil {
+		s.selector.MarkModelPermissionDenied(verificationCtx, credential, upstreamModel)
+	} else if (response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests) && failure.ModelQuotaExhausted && s.selector != nil {
+		retryAfter := time.Duration(0)
+		if response.Header != nil {
+			retryAfter = parseRetryAfter(response.Header.Get("Retry-After"), time.Now().UTC())
+		}
+		s.selector.MarkModelQuotaExhausted(verificationCtx, credential, upstreamModel, retryAfter)
+	}
+	return failure
 }
 
 func teamModelRateLimitKey(providerValue accountdomain.Provider, teamFingerprint, upstreamModel string) string {
