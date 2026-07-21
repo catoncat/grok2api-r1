@@ -251,35 +251,11 @@ func (r *AccountRepository) ListRoutingCandidates(ctx context.Context, provider 
 			modelQuotaBlocks[row.AccountID] = account.ModelQuotaBlock{AccountID: row.AccountID, UpstreamModel: row.UpstreamModel, Reason: row.Reason, CooldownUntil: row.CooldownUntil.UTC(), UpdatedAt: row.UpdatedAt.UTC()}
 		}
 	}
-	sharedSuperBuildModel := false
-	if provider == account.ProviderBuild && len(bound) == 0 {
-		for _, value := range values {
-			if !supported[value.ID] {
-				continue
-			}
-			var billing *account.Billing
-			if snapshot, exists := billings[value.ID]; exists {
-				billing = &snapshot
-			}
-			if account.IsBuildSuper(value, billing) {
-				sharedSuperBuildModel = true
-				break
-			}
-		}
-	}
 	result := make([]account.RoutingCandidate, 0, len(values))
 	for _, value := range values {
 		capabilityKnown, supportsModel := known[value.ID], supported[value.ID]
 		if len(bound) > 0 {
 			capabilityKnown, supportsModel = true, true
-		} else if sharedSuperBuildModel {
-			var billing *account.Billing
-			if snapshot, exists := billings[value.ID]; exists {
-				billing = &snapshot
-			}
-			if account.IsBuildSuper(value, billing) {
-				capabilityKnown, supportsModel = true, true
-			}
 		}
 		candidate := account.RoutingCandidate{Credential: value, ModelCapabilityKnown: capabilityKnown, SupportsModel: supportsModel}
 		if billing, ok := billings[value.ID]; ok {

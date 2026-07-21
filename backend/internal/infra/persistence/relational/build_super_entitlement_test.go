@@ -122,8 +122,10 @@ func TestListRoutingCandidatesSharesEntitledBuildModels(t *testing.T) {
 	if c := byID[observer.ID]; !c.SupportsModel {
 		t.Fatalf("entitled observer should support model: %#v", c)
 	}
-	if c := byID[peer.ID]; !c.SupportsModel || !c.ModelCapabilityKnown {
-		t.Fatalf("entitled peer should share Super model support: %#v", c)
+	// Q2（verified 绑定优先）：Billing paid/Super 共享推断不授权。peer 自己没有
+	// 该模型的能力快照或绑定时不可选，即使另一个 Super 账号有真实能力。
+	if c := byID[peer.ID]; c.SupportsModel {
+		t.Fatalf("unverified Super account became selectable via shared inference: %#v", c)
 	}
 	// paid filter includes entitlement
 	assertAccountFilterCount(t, ctx, accounts, repository.AccountListFilter{QuotaType: "paid", Now: now}, 2)

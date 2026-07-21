@@ -137,7 +137,8 @@ func TestBuildPaidCapabilitiesAreSharedAcrossActiveSuperAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if route.SupportedAccounts != 3 || route.TotalAccounts != 4 {
+	// Q2：只有真实能力快照计入支持数（observer + freeObserver = 2）。
+	if route.SupportedAccounts != 2 || route.TotalAccounts != 4 {
 		t.Fatalf("shared route availability = %#v", route)
 	}
 	if _, _, err := models.List(ctx, repository.ModelListQuery{
@@ -153,10 +154,14 @@ func TestBuildPaidCapabilitiesAreSharedAcrossActiveSuperAccounts(t *testing.T) {
 	for _, candidate := range candidates {
 		byID[candidate.Credential.ID] = candidate
 	}
-	for _, accountID := range []uint64{observer.ID, peer.ID, freeObserver.ID} {
+	for _, accountID := range []uint64{observer.ID, freeObserver.ID} {
 		if candidate := byID[accountID]; !candidate.ModelCapabilityKnown || !candidate.SupportsModel {
 			t.Fatalf("account %d should support shared model: %#v", accountID, candidate)
 		}
+	}
+	// Super 推断不授权：peer 是 paid Super 但没有自己的能力快照，不可选。
+	if candidate := byID[peer.ID]; candidate.SupportsModel {
+		t.Fatalf("paid Super peer became selectable via shared inference: %#v", candidate)
 	}
 	if candidate := byID[freePeer.ID]; !candidate.ModelCapabilityKnown || candidate.SupportsModel {
 		t.Fatalf("free peer must keep its own capability snapshot: %#v", candidate)

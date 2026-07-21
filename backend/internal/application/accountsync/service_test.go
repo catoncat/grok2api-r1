@@ -455,3 +455,78 @@ func (a *countingAdapter) ParseImportedCredentials([]byte) ([]provider.Credentia
 func (a *countingAdapter) MarshalCredentials([]provider.CredentialSeed) ([]byte, error) {
 	return nil, nil
 }
+
+func TestSyncAccountVerifiesBuildWithExistingModelSnapshot(t *testing.T) {
+	models := &modelStub{hasSnapshot: true}
+	verifier := &buildModelVerifierStub{models: models}
+	service := NewService(slog.Default(), accountReaderStub{provider: accountdomain.ProviderBuild}, &billingStub{hasSnapshot: true}, nil, models)
+	service.SetBuildModelVerifier(verifier)
+
+	if err := service.syncAccount(context.Background(), 6); err != nil {
+		t.Fatal(err)
+	}
+	verifier.mu.Lock()
+	defer verifier.mu.Unlock()
+	if len(verifier.calls) != 1 || verifier.calls[0] != 6 || verifier.modelsSyncedAtCall != 0 {
+		t.Fatalf("verification calls=%#v model syncs=%d", verifier.calls, verifier.modelsSyncedAtCall)
+	}
+}
+
+func TestSyncAccountVerifiesBuildAfterModelSyncBestEffort(t *testing.T) {
+	models := &modelStub{}
+	verifier := &buildModelVerifierStub{models: models, err: errors.New("probe unavailable")}
+	service := NewService(slog.Default(), accountReaderStub{provider: accountdomain.ProviderBuild}, &billingStub{hasSnapshot: true}, nil, models)
+	service.SetBuildModelVerifier(verifier)
+
+	if err := service.syncAccount(context.Background(), 7); err != nil {
+		t.Fatalf("best-effort verification failed initial sync: %v", err)
+	}
+	verifier.mu.Lock()
+	defer verifier.mu.Unlock()
+	if len(verifier.calls) != 1 || verifier.calls[0] != 7 || verifier.modelsSyncedAtCall != 1 {
+		t.Fatalf("verification calls=%#v model syncs=%d", verifier.calls, verifier.modelsSyncedAtCall)
+	}
+}
+
+func TestSyncAccountSkipsBuildVerificationWhenModelSyncFailsOrProviderDiffers(t *testing.T) {
+	failedModels := &modelStub{syncErr: errors.New("models unavailable")}
+	failedVerifier := &buildModelVerifierStub{models: failedModels}
+	failed := NewService(slog.Default(), accountReaderStub{provider: accountdomain.ProviderBuild}, &billingStub{hasSnapshot: true}, nil, failedModels)
+	failed.SetBuildModelVerifier(failedVerifier)
+	if err := failed.syncAccount(context.Background(), 8); err == nil {
+		t.Fatal("expected model sync failure")
+	}
+	if len(failedVerifier.calls) != 0 {
+		t.Fatalf("verification after failed model sync = %#v", failedVerifier.calls)
+	}
+
+	consoleModels := &modelStub{hasSnapshot: true}
+	consoleVerifier := &buildModelVerifierStub{models: consoleModels}
+	console := NewService(slog.Default(), accountReaderStub{provider: accountdomain.ProviderConsole}, &billingStub{}, &quotaStub{hasSnapshot: true}, consoleModels)
+	console.SetBuildModelVerifier(consoleVerifier)
+	if err := console.syncAccount(context.Background(), 9); err != nil {
+		t.Fatal(err)
+	}
+	if len(consoleVerifier.calls) != 0 {
+		t.Fatalf("console verification calls = %#v", consoleVerifier.calls)
+	}
+}
+
+type buildModelVerifierStub struct {
+	mu                 sync.Mutex
+	models             *modelStub
+	calls              []uint64
+	modelsSyncedAtCall int
+	err                error
+}
+
+func (s *buildModelVerifierStub) VerifyBuildModel(_ context.Context, accountID uint64, upstreamModel string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if upstreamModel != "grok-4.5" {
+		return errors.New("unexpected model")
+	}
+	_, s.modelsSyncedAtCall = s.models.counts()
+	s.calls = append(s.calls, accountID)
+	return s.err
+}
