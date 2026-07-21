@@ -1,0 +1,39 @@
+backend/internal/application/gateway/failure.go
+  s_8cefdaccf172d2::t_381fa1314339aa 24,188-194
+  s_8cefdaccf172d2::t_9635bf4f8500f2 112
+  s_b0b2beb596d95a::t_56daec564f9973 195-196
+backend/internal/application/gateway/service_test.go
+  s_8cefdaccf172d2::t_fa783729d9c87a 924,927-928
+  s_8cefdaccf172d2::t_7d823d71355f06 929
+backend/internal/application/gateway/selector.go
+  s_8cefdaccf172d2::t_87e7ee02229d03 36-39,528-538
+  s_b0b2beb596d95a::t_7856258e8a47ff 539-542
+backend/internal/application/gateway/service.go
+  s_b0b2beb596d95a::t_8772861e830dae 654-667,670,721-725,744-746
+backend/internal/application/gateway/failure_test.go
+  s_8cefdaccf172d2::t_1a8bdf15b3da25 18,25-34,43-50,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "59f04d67a832e146f6ed6de6c657d5dc17b955e2",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_b0b2beb596d95a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8537-a545-7ce5-ae3e-d9e47fb07df2",
+        "model": "qwen3.8-max-preview"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
