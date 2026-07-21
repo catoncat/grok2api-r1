@@ -165,7 +165,9 @@ func TestExportProviderCredentialsRoundTripsSSOProviders(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Count != 1 || len(values) != 1 || values[0].Provider != test.providerValue || values[0].AccessToken != "sso-token" || values[0].CloudflareCookies != "cf_clearance=clearance-token" || values[0].Email != test.name+"@example.com" || values[0].UserID != test.name+"-user-id" {
+			// 导出按 r1 安全边界不含 cloudflare_cookies，回导后该字段为空；
+			// email/user_id 归因保留。
+			if result.Count != 1 || len(values) != 1 || values[0].Provider != test.providerValue || values[0].AccessToken != "sso-token" || values[0].CloudflareCookies != "" || values[0].Email != test.name+"@example.com" || values[0].UserID != test.name+"-user-id" {
 				t.Fatalf("round-trip result = %#v, values = %#v", result, values)
 			}
 			if test.providerValue == accountdomain.ProviderWeb && (values[0].WebTier != accountdomain.WebTierSuper || values[0].WebNSFWEnabledAt == nil || !values[0].WebNSFWEnabledAt.Equal(nsfwAt) || values[0].WebTermsAcceptedAt == nil || !values[0].WebTermsAcceptedAt.Equal(tosAt) || values[0].WebTermsAcceptedVersion != accountdomain.CurrentWebTermsVersion || values[0].WebBirthDateSetAt == nil || !values[0].WebBirthDateSetAt.Equal(birthDateAt)) {

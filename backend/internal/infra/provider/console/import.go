@@ -24,6 +24,7 @@ type importEntry struct {
 	Name              string `json:"name"`
 	Email             string `json:"email,omitempty"`
 	UserID            string `json:"user_id,omitempty"`
+	TeamID            string `json:"team_id,omitempty"`
 	SSOToken          string `json:"sso_token"`
 	Token             string `json:"token"`
 	CloudflareCookies string `json:"cloudflare_cookies"`
@@ -71,6 +72,11 @@ func parseImportedCredentials(data []byte) ([]provider.CredentialSeed, error) {
 		seed := credentialSeed(name, token)
 		seed.Email = strings.TrimSpace(entry.Email)
 		seed.UserID = strings.TrimSpace(entry.UserID)
+		teamID := strings.TrimSpace(entry.TeamID)
+		if len(teamID) > 255 {
+			return nil, fmt.Errorf("第 %d 个账号的 team_id 超过 255 字符", index+1)
+		}
+		seed.TeamID = teamID
 		seed.CloudflareCookies = entry.CloudflareCookies
 		result = append(result, seed)
 	}
@@ -114,7 +120,9 @@ func credentialSeed(name, token string) provider.CredentialSeed {
 func marshalCredentials(values []provider.CredentialSeed) ([]byte, error) {
 	document := importDocument{Provider: string(account.ProviderConsole), Accounts: make([]importEntry, 0, len(values))}
 	for _, value := range values {
-		document.Accounts = append(document.Accounts, importEntry{Name: value.Name, Email: value.Email, UserID: value.UserID, SSOToken: value.AccessToken, CloudflareCookies: value.CloudflareCookies})
+		// 导出不含 cloudflare_cookies（r1 安全边界）；email/user_id 与 team_id
+		// 两种归因都保留（并存兼容 Q1）。
+		document.Accounts = append(document.Accounts, importEntry{Name: value.Name, Email: value.Email, UserID: value.UserID, TeamID: value.TeamID, SSOToken: value.AccessToken})
 	}
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
