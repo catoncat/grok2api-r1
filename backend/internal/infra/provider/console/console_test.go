@@ -482,3 +482,51 @@ func (consoleEgressRepositoryStub) UpdateEgressNode(context.Context, egressdomai
 func (consoleEgressRepositoryStub) DeleteEgressNode(context.Context, uint64) error {
 	return errors.New("unsupported")
 }
+
+func TestConsoleQuotaWindowsAreIsolatedByUpstreamModel(t *testing.T) {
+	adapter := NewAdapter(Config{}, nil, nil)
+	credential := account.Credential{ID: 42, Provider: account.ProviderConsole}
+	snapshot, err := adapter.SyncQuota(context.Background(), credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := Catalog()
+	quotaModes := QuotaModes()
+	if len(quotaModes) != 5 || len(snapshot.Windows) != len(quotaModes) {
+		t.Fatalf("quota windows/modes = %d/%d, want five real model buckets", len(snapshot.Windows), len(quotaModes))
+	}
+	windows := make(map[string]account.QuotaWindow, len(snapshot.Windows))
+	for _, window := range snapshot.Windows {
+		if _, exists := windows[window.Mode]; exists {
+			t.Fatalf("duplicate quota mode %q", window.Mode)
+		}
+		windows[window.Mode] = window
+	}
+	for _, spec := range models {
+		mode := adapter.QuotaMode(spec.UpstreamModel)
+		expectedModel := spec.UpstreamModel
+		if spec.QuotaModel != "" {
+			expectedModel = spec.QuotaModel
+		}
+		if mode != "console:"+expectedModel {
+			t.Fatalf("quota mode for %q = %q", spec.UpstreamModel, mode)
+		}
+		window, ok := windows[mode]
+		if !ok || window.AccountID != credential.ID || window.Remaining != DefaultQuotaLimit || window.Total != DefaultQuotaLimit || window.ResetAt == nil {
+			t.Fatalf("quota window for %q = %#v", spec.UpstreamModel, window)
+		}
+		refreshed, err := adapter.SyncQuotaMode(context.Background(), credential, mode)
+		if err != nil || refreshed.Mode != mode {
+			t.Fatalf("refresh quota mode %q = %#v, %v", mode, refreshed, err)
+		}
+	}
+	if alias, reasoning := adapter.QuotaMode("grok-4.20-0309"), adapter.QuotaMode("grok-4.20-0309-reasoning"); alias != reasoning {
+		t.Fatalf("official alias quota mode = %q, reasoning mode = %q", alias, reasoning)
+	}
+	if mode := adapter.QuotaMode("unknown-model"); mode != "" {
+		t.Fatalf("unknown model quota mode = %q", mode)
+	}
+	if _, err := adapter.SyncQuotaMode(context.Background(), credential, "console"); err == nil {
+		t.Fatal("legacy shared Console quota mode was accepted")
+	}
+}
