@@ -1,0 +1,104 @@
+frontend/src/shared/i18n/index.ts
+  s_8cefdaccf172d2::t_3830a42af2b0e7 1248
+  s_8cefdaccf172d2::t_5f6f2dcf601129 83,762,766,1058
+README.md
+  s_8cefdaccf172d2::t_2a37fff6ba2cf2 330-341
+README.zh-CN.md
+  s_8cefdaccf172d2::t_278f4fb556dca5 331-342
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_f94bd04dde9ffd 67,192-193,199,297,337,362,381-388,503-514
+backend/internal/application/account/service.go
+  s_8cefdaccf172d2::t_ac9fd92c87fcde 474,489-491
+backend/internal/application/egress/service.go
+  s_8cefdaccf172d2::t_40fd442e3218f7 17-20,47-52,66-71,91,102-105,121-124,132-134,138-161,219-223,234,242-243,248-255
+backend/internal/application/egress/service_test.go
+  s_8cefdaccf172d2::t_de5dd96fe55505 83,109-127
+backend/internal/application/gateway/service.go
+  s_8cefdaccf172d2::t_318d5afe7388b4 40
+backend/internal/application/gateway/video.go
+  s_8cefdaccf172d2::t_d8811188513104 49-52,83,495,520-528
+backend/internal/application/gateway/video_test.go
+  s_8cefdaccf172d2::t_66a7d4adb8aeab 25,41,46-57
+backend/internal/application/settings/service.go
+  s_8cefdaccf172d2::t_b0b914516e435c 43-46,55-57,276-291,295-296,353-355,422-425,452,456-457,473-478,504-506
+backend/internal/application/settings/service_test.go
+  s_8cefdaccf172d2::t_88317b30fc0287 94-124
+backend/internal/domain/egress/egress.go
+  s_8cefdaccf172d2::t_24a7a422ac3741 23-38,42-55
+backend/internal/domain/media/job.go
+  s_8cefdaccf172d2::t_0359f18450f643 14-20,23-45
+backend/internal/domain/settings/settings.go
+  s_8cefdaccf172d2::t_2b76b3c1ecbd45 47-50
+backend/internal/infra/config/config.go
+  s_8cefdaccf172d2::t_cd893eb23e07fd 23-24,26,144-147,447-461,570-571,605-611
+backend/internal/infra/config/config_test.go
+  s_8cefdaccf172d2::t_ff1d9030601122 251-273
+backend/internal/infra/egress/flaresolverr.go
+  s_8cefdaccf172d2::t_676d01786a7cb9 1-174
+backend/internal/infra/egress/flaresolverr_test.go
+  s_8cefdaccf172d2::t_7eeb6864c96014 1-68
+backend/internal/infra/egress/manager.go
+  s_8cefdaccf172d2::t_6cfb09cb7f0c7d 32-36,43-55,67-71,81-114,135-164,202,210,212-220,284-290,304-313,323,335-346,516,604-609,661-667,702-707,713-1157
+backend/internal/infra/egress/manager_test.go
+  s_8cefdaccf172d2::t_8969602db147b3 14,62-89,145-153,313-367,477-551,574-800,1232-1246
+backend/internal/infra/egress/tlsclient.go
+  s_8cefdaccf172d2::t_f1ceaa918ec587 6,9-11,22-23,36-38,55,58,71-96
+backend/internal/infra/persistence/relational/egress_repository.go
+  s_8cefdaccf172d2::t_f192bfda17a33d 5,66-107,123-125,138-140
+backend/internal/infra/persistence/relational/egress_sort_test.go
+  s_8cefdaccf172d2::t_9da5c6803cf48c 6,8,47-76
+backend/internal/infra/persistence/relational/media_repository.go
+  s_8cefdaccf172d2::t_bc8054e7a9d84a 269-271,283,299-301,383,395-399,418-420,459,471-474,482,489-490
+backend/internal/infra/persistence/relational/media_repository_test.go
+  s_8cefdaccf172d2::t_c54541ecd927fd 128-189
+backend/internal/infra/persistence/relational/models.go
+  s_8cefdaccf172d2::t_166558129bde33 374-402,455-470
+backend/internal/infra/persistence/relational/postgres_integration_test.go
+  s_8cefdaccf172d2::t_ed82fc8aa4d8f2 8-9,14,31,117-142
+backend/internal/infra/persistence/relational/schema.go
+  s_8cefdaccf172d2::t_274d459dfeb778 5,7,9-10,13-14,80,87-88,123-133,190-261
+backend/internal/infra/persistence/relational/schema_media_job_upgrade_test.go
+  s_8cefdaccf172d2::t_6123b5a349d966 5,8-9,43-155,203,302,319-332,347-350,361-386
+backend/internal/infra/provider/cli/adapter.go
+  s_8cefdaccf172d2::t_5bb9cb6a0e1e44 14,57,68-74,150-152,192,209,211,216,239
+backend/internal/infra/provider/cli/adapter_test.go
+  s_8cefdaccf172d2::t_81f762fef4489c 214-215,220-229,231,234,237-238,265-283,296
+backend/internal/infra/provider/cli/responses_reasoning_recovery.go
+  s_8cefdaccf172d2::t_efb238232145d2 19-44,46-53,60,63,65,70,74-79,82-112,114-115,119-120,123,125-126,128,130-209
+backend/internal/infra/provider/cli/responses_reasoning_recovery_test.go
+  s_8cefdaccf172d2::t_3519b063a809a1 171-268,288
+backend/internal/transport/http/egress/handler.go
+  s_8cefdaccf172d2::t_f2a3f5db027ef9 7,25,29-40,53-64,133-134,156-159
+backend/internal/transport/http/inference/handler.go
+  s_8cefdaccf172d2::t_33b74bc2466ba3 587-588,1471-1473
+backend/internal/transport/http/inference/handler_test.go
+  s_8cefdaccf172d2::t_2b5986056f5307 141-153
+backend/internal/transport/http/settings/handler.go
+  s_8cefdaccf172d2::t_b8f63f47905d29 68-84,160-162,173-176,209,227-229,269-277
+docker-compose.yml
+  s_8cefdaccf172d2::t_800daa8e7cee4b 22-44
+frontend/src/features/settings/egress-nodes.tsx
+  s_8cefdaccf172d2::t_3c64b2e2a1e1b5 2,17-18,25,50-54,104-114,118-119,134,153-161,164,169,185-200
+frontend/src/features/settings/settings-api.ts
+  s_8cefdaccf172d2::t_6279b4a31217c5 11,30,56-57,67,74,77,82,119-122
+frontend/src/features/settings/settings-model.ts
+  s_8cefdaccf172d2::t_c76587d9e6996e 56-59,78-80,125,158,248-259
+frontend/src/features/settings/settings-page.tsx
+  s_8cefdaccf172d2::t_010a9aba0505c2 2,33-34,177-196,198,285,295,300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ff0c2d887688fa645ec3a5031a0a6b2964451987",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
