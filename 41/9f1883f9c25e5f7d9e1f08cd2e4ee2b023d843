@@ -1,0 +1,21 @@
+backend/internal/domain/audit/pricing.go
+  s_8eb1d458b8bf05::t_702404e6a55caf 58
+backend/internal/domain/audit/pricing_test.go
+  s_8eb1d458b8bf05::t_0cf49d89f299bc 15,56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "419f1883f9c25e5f7d9e1f08cd2e4ee2b023d843",
+  "prompts": {},
+  "sessions": {
+    "s_8eb1d458b8bf05": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8260-c3bc-76d6-99f9-88915a9a8818",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
