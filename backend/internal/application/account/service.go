@@ -471,7 +471,7 @@ func (s *Service) BatchUpdate(ctx context.Context, ids []uint64, input UpdateInp
 	if err != nil {
 		return 0, err
 	}
-	if input.Enabled != nil && !*input.Enabled {
+	if input.Enabled != nil && !*input.Enabled && s.sticky != nil {
 		for _, id := range ids {
 			_ = s.sticky.DeleteByAccount(ctx, id)
 		}
@@ -486,7 +486,9 @@ func (s *Service) BatchDelete(ctx context.Context, ids []uint64) (int64, error) 
 		return 0, err
 	}
 	for _, id := range ids {
-		_ = s.sticky.DeleteByAccount(ctx, id)
+		if s.sticky != nil {
+			_ = s.sticky.DeleteByAccount(ctx, id)
+		}
 		s.clearRefreshState(id)
 	}
 	deleted, err := s.accounts.DeleteMany(ctx, ids)

@@ -327,6 +327,18 @@ The relational database stores accounts, credentials, models, quotas, client key
 - A link shares only an anonymous egress identity and management-page provenance. Credentials, quotas, availability, cooldowns, concurrency, model capabilities, and billing remain independent.
 - Email addresses are used only for display and search, never as proxy identities.
 
+### Managed FlareSolverr clearance
+
+To automatically maintain Grok Web Cloudflare Clearance, start the optional FlareSolverr Compose service:
+
+```bash
+docker compose --profile flaresolverr up -d
+# or
+podman compose --profile flaresolverr up -d
+```
+
+Then open **Runtime Settings -> Media & Network -> Clearance**, select `FlareSolverr`, and use `http://flaresolverr:8191` as the solver URL. FlareSolverr is not published on the host; each Web or WebAsset egress node uses its own proxy to obtain cookies and User-Agent. Console keeps its independent manually configured identity and never joins the Web clearance lifecycle.
+
 ### Resin sticky proxies
 
 Proxy usernames support the `{account}` placeholder:
