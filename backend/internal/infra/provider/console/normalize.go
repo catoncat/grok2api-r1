@@ -45,7 +45,9 @@ func normalizeRequest(body []byte, spec ModelSpec) ([]byte, error) {
 	ensureReasoningInclude(payload)
 	retainedClientTools := normalizeConsoleTools(payload)
 	if spec.SearchTools {
-		mergeSearchTools(payload)
+		if err := mergeSearchTools(payload); err != nil {
+			return nil, err
+		}
 	}
 	normalizeConsoleToolChoice(payload, retainedClientTools)
 	return json.Marshal(payload)
@@ -258,19 +260,25 @@ func normalizeConsoleTools(payload map[string]any) bool {
 	return retainedClientTools
 }
 
-func mergeSearchTools(payload map[string]any) {
+func mergeSearchTools(payload map[string]any) error {
 	defaults := []any{
 		map[string]any{"type": "web_search", "enable_image_understanding": true},
 		map[string]any{"type": "x_search", "enable_video_understanding": true},
 	}
 	positions := map[string]int{"web_search": 0, "x_search": 1}
+	defaultPositions := map[int]bool{0: true, 1: true}
 	result := append([]any(nil), defaults...)
 	if value, exists := payload["tools"]; exists && value != nil {
 		tools, _ := value.([]any)
 		for _, tool := range tools {
-			identity := toolIdentity(tool)
+			tool = normalizeSearchToolAlias(tool)
+			identity := toolUpstreamName(tool)
 			if index, exists := positions[identity]; identity != "" && exists {
+				if !defaultPositions[index] && toolIdentity(result[index]) != toolIdentity(tool) {
+					return fmt.Errorf("Console tools 包含重复的上游工具名 %q", identity)
+				}
 				result[index] = tool
+				delete(defaultPositions, index)
 				continue
 			}
 			if identity != "" {
@@ -282,7 +290,15 @@ func mergeSearchTools(payload map[string]any) {
 	payload["tools"] = result
 	if _, exists := payload["tool_choice"]; !exists {
 		payload["tool_choice"] = "auto"
+	} else {
+		choice := normalizeSearchToolAlias(payload["tool_choice"])
+		identity := toolChoiceIdentity(choice)
+		if identity != "" && !containsToolIdentity(result, identity) {
+			return fmt.Errorf("Console tool_choice 指向未声明的上游工具 %q", identity)
+		}
+		payload["tool_choice"] = choice
 	}
+	return nil
 }
 
 func normalizeConsoleToolChoice(payload map[string]any, retainedClientTools bool) {
@@ -292,9 +308,12 @@ func normalizeConsoleToolChoice(payload map[string]any, retainedClientTools bool
 		return
 	}
 	if value, ok := choice.(string); ok {
-		switch strings.ToLower(strings.TrimSpace(value)) {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		switch normalized {
 		case "none", "auto":
-			payload["tool_choice"] = strings.ToLower(strings.TrimSpace(value))
+			payload["tool_choice"] = normalized
+		case "web_search", "x_search":
+			payload["tool_choice"] = normalized
 		case "required":
 			if !retainedClientTools {
 				payload["tool_choice"] = "auto"
@@ -310,6 +329,11 @@ func normalizeConsoleToolChoice(payload map[string]any, retainedClientTools bool
 		return
 	}
 	typeName, _ := object["type"].(string)
+	typeName = strings.ToLower(strings.TrimSpace(typeName))
+	if typeName == "web_search" || typeName == "x_search" {
+		payload["tool_choice"] = map[string]any{"type": typeName}
+		return
+	}
 	if typeName != "function" || !retainedClientTools {
 		payload["tool_choice"] = "auto"
 		return
@@ -325,6 +349,79 @@ func normalizeConsoleToolChoice(payload map[string]any, retainedClientTools bool
 		return
 	}
 	payload["tool_choice"] = map[string]any{"type": "function", "name": strings.TrimSpace(name)}
+}
+
+func containsToolIdentity(tools []any, identity string) bool {
+	for _, tool := range tools {
+		if toolIdentity(tool) == identity {
+			return true
+		}
+	}
+	return false
+}
+
+func toolChoiceIdentity(value any) string {
+	if choice, ok := value.(string); ok {
+		switch choice {
+		case "web_search", "x_search":
+			return choice
+		default:
+			return ""
+		}
+	}
+	choice, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	typeName, _ := choice["type"].(string)
+	switch typeName {
+	case "web_search", "x_search", "function":
+		return toolIdentity(choice)
+	default:
+		return ""
+	}
+}
+
+func toolUpstreamName(value any) string {
+	tool, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	typeName, _ := tool["type"].(string)
+	if typeName == "function" {
+		name, _ := tool["name"].(string)
+		return strings.TrimSpace(name)
+	}
+	return strings.TrimSpace(typeName)
+}
+
+func normalizeSearchToolAlias(value any) any {
+	tool, ok := value.(map[string]any)
+	if !ok {
+		if typeName, isString := value.(string); isString && isWebSearchAlias(typeName) {
+			return "web_search"
+		}
+		return value
+	}
+	typeName, _ := tool["type"].(string)
+	if !isWebSearchAlias(typeName) {
+		return value
+	}
+	result := make(map[string]any, len(tool))
+	for key, item := range tool {
+		result[key] = item
+	}
+	result["type"] = "web_search"
+	return result
+}
+
+func isWebSearchAlias(value string) bool {
+	switch value {
+	case "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26":
+		return true
+	default:
+		return false
+	}
 }
 
 func toolIdentity(value any) string {
