@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 
 	domain "github.com/chenyme/grok2api/backend/internal/domain/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
@@ -39,17 +40,28 @@ type Input struct {
 type Service struct {
 	repository repository.EgressRepository
 	cipher     *security.Cipher
-	browserUA  string
+	mu         sync.RWMutex
+	webUA      string
+	consoleUA  string
 }
 
-func NewService(repository repository.EgressRepository, cipher *security.Cipher, browserUA string) *Service {
-	return &Service{repository: repository, cipher: cipher, browserUA: strings.TrimSpace(browserUA)}
+func NewService(repository repository.EgressRepository, cipher *security.Cipher, webUA, consoleUA string) *Service {
+	return &Service{repository: repository, cipher: cipher, webUA: strings.TrimSpace(webUA), consoleUA: strings.TrimSpace(consoleUA)}
+}
+
+func (s *Service) UpdateDefaults(webUA, consoleUA string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webUA = strings.TrimSpace(webUA)
+	s.consoleUA = strings.TrimSpace(consoleUA)
 }
 
 func (s *Service) DefaultUserAgents() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return map[string]string{
-		string(domain.ScopeBuild): "", string(domain.ScopeWeb): s.browserUA, string(domain.ScopeConsole): s.browserUA,
-		string(domain.ScopeWebAsset): s.browserUA,
+		string(domain.ScopeBuild): "", string(domain.ScopeWeb): s.webUA, string(domain.ScopeConsole): s.consoleUA,
+		string(domain.ScopeWebAsset): s.webUA,
 	}
 }
 
@@ -117,7 +129,9 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 		value.UserAgent = strings.TrimSpace(input.UserAgent)
 	}
 	if input.Scope != domain.ScopeBuild && value.UserAgent == "" {
-		value.UserAgent = s.browserUA
+		s.mu.RLock()
+		value.UserAgent = s.defaultUserAgent(input.Scope)
+		s.mu.RUnlock()
 	}
 	if len(value.UserAgent) > 512 {
 		return domain.Node{}, fmt.Errorf("%w: User-Agent 过长", ErrInvalidInput)
@@ -157,6 +171,13 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 		value.Health = 1
 	}
 	return value, nil
+}
+
+func (s *Service) defaultUserAgent(scope domain.Scope) string {
+	if scope == domain.ScopeConsole {
+		return s.consoleUA
+	}
+	return s.webUA
 }
 
 func publicNode(value domain.Node) domain.PublicNode {

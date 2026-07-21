@@ -52,6 +52,7 @@ type ProviderWebConfig struct {
 
 type ProviderConsoleConfig struct {
 	BaseURL     string
+	UserAgent   string
 	ChatTimeout string
 }
 
@@ -273,10 +274,12 @@ func applyDomainConfig(base config.Config, value settingsdomain.Config) config.C
 		MediaConcurrency: value.ProviderWeb.MediaConcurrency, AllowNSFW: value.ProviderWeb.AllowNSFW,
 		RecoveryBackoffBase: config.Duration(value.ProviderWeb.RecoveryBackoffBase), RecoveryBackoffMax: config.Duration(value.ProviderWeb.RecoveryBackoffMax),
 	}
-	// Console 是后续版本新增的完整配置段；旧 JSON 整段缺失时沿用代码默认值。
+	// Console 是后续版本新增的完整配置段；仅整段缺失时沿用代码默认值，
+	// 部分存在但不完整的配置仍交给 Validate 拒绝（settings.legacy_preserve）。
 	if value.ProviderConsole != (settingsdomain.ProviderConsoleConfig{}) {
 		base.Provider.Console = config.ConsoleProviderConfig{
-			BaseURL: value.ProviderConsole.BaseURL, ChatTimeout: config.Duration(value.ProviderConsole.ChatTimeout),
+			BaseURL: value.ProviderConsole.BaseURL, UserAgent: value.ProviderConsole.UserAgent,
+			ChatTimeout: config.Duration(value.ProviderConsole.ChatTimeout),
 		}
 	}
 	randomDelay := time.Duration(-1)
@@ -328,7 +331,8 @@ func toDomainConfig(value config.Config) settingsdomain.Config {
 			RecoveryBackoffBase: value.Provider.Web.RecoveryBackoffBase.Value(), RecoveryBackoffMax: value.Provider.Web.RecoveryBackoffMax.Value(),
 		},
 		ProviderConsole: settingsdomain.ProviderConsoleConfig{
-			BaseURL: value.Provider.Console.BaseURL, ChatTimeout: value.Provider.Console.ChatTimeout.Value(),
+			BaseURL: value.Provider.Console.BaseURL, UserAgent: value.Provider.Console.UserAgent,
+			ChatTimeout: value.Provider.Console.ChatTimeout.Value(),
 		},
 		Batch: settingsdomain.BatchConfig{
 			ImportConcurrency: value.Batch.ImportConcurrency, ConversionConcurrency: value.Batch.ConversionConcurrency,
@@ -398,6 +402,7 @@ func mergeEditable(current config.Config, input EditableConfig) (config.Config, 
 	next.Provider.Web.MediaConcurrency = input.ProviderWeb.MediaConcurrency
 	next.Provider.Web.AllowNSFW = input.ProviderWeb.AllowNSFW
 	next.Provider.Console.BaseURL = strings.TrimSpace(input.ProviderConsole.BaseURL)
+	next.Provider.Console.UserAgent = strings.TrimSpace(input.ProviderConsole.UserAgent)
 	next.Batch = config.BatchConfig{
 		ImportConcurrency: input.Batch.ImportConcurrency, ConversionConcurrency: input.Batch.ConversionConcurrency,
 		SyncConcurrency: input.Batch.SyncConcurrency, RefreshConcurrency: input.Batch.RefreshConcurrency,
@@ -464,7 +469,8 @@ func toEditable(cfg config.Config) EditableConfig {
 			RecoveryBackoffBase: cfg.Provider.Web.RecoveryBackoffBase.String(), RecoveryBackoffMax: cfg.Provider.Web.RecoveryBackoffMax.String(),
 		},
 		ProviderConsole: ProviderConsoleConfig{
-			BaseURL: cfg.Provider.Console.BaseURL, ChatTimeout: cfg.Provider.Console.ChatTimeout.String(),
+			BaseURL: cfg.Provider.Console.BaseURL, UserAgent: cfg.Provider.Console.UserAgent,
+			ChatTimeout: cfg.Provider.Console.ChatTimeout.String(),
 		},
 		Batch: BatchConfig{
 			ImportConcurrency: cfg.Batch.ImportConcurrency, ConversionConcurrency: cfg.Batch.ConversionConcurrency,
