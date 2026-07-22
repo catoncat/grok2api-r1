@@ -1,0 +1,27 @@
+backend/internal/infra/persistence/relational/console_provider_test.go
+  s_8cefdaccf172d2::t_397241564dd3d5 98,113
+  s_8cefdaccf172d2::t_fc8ff892b33746 5
+  s_8cefdaccf172d2::t_2cab2e19873c19 116,130,145
+  s_8cefdaccf172d2::t_1814186552dc56 154-196
+  s_8cefdaccf172d2::t_403e807544e418 197
+backend/internal/infra/persistence/relational/account_repository.go
+  s_8cefdaccf172d2::t_2e176862ca39cb 1543,1561-1563,1570-1571
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_edd3c11278d40c 46-50,225,228,263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2c8598d5dd32d5dc8fae92ce6906019093b9ef8b",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
