@@ -1,0 +1,33 @@
+backend/internal/infra/egress/sticky_retry_test.go
+  s_8cefdaccf172d2::t_a36b0dba1b8f74 11-12,116-136
+  s_8cefdaccf172d2::t_97d31bab24a772 137-138
+backend/internal/infra/egress/manager.go
+  s_8cefdaccf172d2::t_47e0fbb46188c3 68,595-599
+  s_8cefdaccf172d2::t_0f8bedce59af9e 600
+backend/internal/infra/egress/manager_test.go
+  s_8cefdaccf172d2::t_7dc9a504ac4e62 38-42
+  s_8cefdaccf172d2::t_9c09c6a62dddff 22-37,43-54
+backend/internal/infra/provider/web/image.go
+  s_8cefdaccf172d2::t_453d6c6a4768d4 423,465,691-695,1228,1443,1797
+backend/internal/infra/provider/web/chat.go
+  s_8cefdaccf172d2::t_309afd7dff5a57 309
+backend/internal/infra/egress/tlsclient.go
+  s_8cefdaccf172d2::t_986f2cc5a00f67 9,16,146-152
+  s_8cefdaccf172d2::t_4ff089d4ed67b4 153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4f09a865d55dbf9ba8c56dda5985f3bf079dcd25",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
