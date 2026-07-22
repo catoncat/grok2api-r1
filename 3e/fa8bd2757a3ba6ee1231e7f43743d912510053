@@ -1,0 +1,21 @@
+backend/internal/infra/provider/web/chat.go
+  s_8cefdaccf172d2::t_309afd7dff5a57 309
+backend/internal/infra/provider/web/image.go
+  s_8cefdaccf172d2::t_453d6c6a4768d4 423,465,691-695,1228,1443,1797
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3efa8bd2757a3ba6ee1231e7f43743d912510053",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
