@@ -1,0 +1,39 @@
+backend/internal/application/gateway/image.go
+  s_8cefdaccf172d2::t_d4152a07edd1cb 203-206,211,215-220
+  s_8cefdaccf172d2::t_abddc0160edec5 5
+backend/internal/infra/provider/web/image.go
+  s_8cefdaccf172d2::t_0b58c532a81915 1468-1478,1483
+backend/internal/infra/provider/web/protocol_test.go
+  s_8cefdaccf172d2::t_1c7fdf695df828 1089-1090
+  s_b0b2beb596d95a::t_ba72ebc30fff02 1571-1586
+backend/internal/application/model/service_test.go
+  s_8cefdaccf172d2::t_f16e7fbafcfd5d 192-194
+backend/internal/infra/media/s3_store.go
+  s_8cefdaccf172d2::t_af49048b10ec88 138
+backend/internal/transport/http/settings/handler.go
+  s_8cefdaccf172d2::t_977e617e77c78f 235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "3975cb3bee0bc504f8ed8cf68fb851042e31cf1f",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_b0b2beb596d95a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8537-a545-7ce5-ae3e-d9e47fb07df2",
+        "model": "qwen3.8-max-preview"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

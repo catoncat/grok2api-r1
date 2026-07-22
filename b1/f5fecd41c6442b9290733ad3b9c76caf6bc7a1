@@ -1,0 +1,30 @@
+backend/internal/infra/persistence/relational/account_repository.go
+  s_8cefdaccf172d2::t_9e63be0da7273c 446,448-549
+backend/internal/infra/persistence/relational/repository_test.go
+  s_8cefdaccf172d2::t_ff8023bb0ef784 16,57-235
+  s_8cefdaccf172d2::t_29fcbc449446fe 236
+backend/internal/application/account/service.go
+  s_8cefdaccf172d2::t_c60c5fd9dcbfb1 2393
+backend/internal/repository/account.go
+  s_8cefdaccf172d2::t_18bea09bfb3c17 51
+backend/internal/app/startup_test.go
+  s_8cefdaccf172d2::t_c16e5898cb9852 31-57
+backend/internal/app/startup.go
+  s_8cefdaccf172d2::t_edab0979ee6b27 17-23,172,175-176,180,301,308,311,322-328,330-332,335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b1f5fecd41c6442b9290733ad3b9c76caf6bc7a1",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

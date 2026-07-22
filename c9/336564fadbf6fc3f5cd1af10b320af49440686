@@ -1,0 +1,45 @@
+backend/internal/infra/provider/web/quota.go
+  s_8cefdaccf172d2::t_3e19c80ce922f9 320
+  s_8cefdaccf172d2::t_cbcb77a3c8a454 150,164-169,171,242-243
+  s_8cefdaccf172d2::t_ff6f57b50b9406 244
+backend/internal/infra/provider/web/protocol_test.go
+  s_8cefdaccf172d2::t_b8365f24b9237a 18
+  s_8cefdaccf172d2::t_625c99ebd28c0e 17
+  s_8cefdaccf172d2::t_5905425b33c8b9 20
+  s_8cefdaccf172d2::t_bded87d7b99825 881,1220-1446
+backend/internal/infra/provider/web/chat.go
+  s_8cefdaccf172d2::t_dea694f791794a 38-41,170-173,175-192,206-217,219,237,240-244,251,259-263,270,273-275,307-308,312-318,352,358,398-399,401,433,497-501,1003-1006,1016-1047
+  s_8cefdaccf172d2::t_cef7bb69297f26 1048
+backend/internal/infra/provider/web/quota_test.go
+  s_8cefdaccf172d2::t_5fa788ad2711c1 12,17
+  s_8cefdaccf172d2::t_98e9329502b792 18,259-312
+backend/internal/infra/provider/web/headers.go
+  s_8cefdaccf172d2::t_e378fcd7794dec 12-20
+backend/internal/infra/provider/web/image.go
+  s_8cefdaccf172d2::t_7d5e5b664dcb77 1406,1416-1428,1430
+  s_8cefdaccf172d2::t_8f923048644dad 110-118
+  s_8cefdaccf172d2::t_28c0c48f5830d0 394,396-398,404-412,414,683-686,1543-1547
+  s_8cefdaccf172d2::t_e7bebedfe23696 1641-1647
+  s_8cefdaccf172d2::t_2ac9134889a01e 446-453,456
+  s_8cefdaccf172d2::t_e035abf8306c5b 796,1292,1394,1397
+backend/internal/infra/provider/web/chat_statsig_egress_test.go
+  s_8cefdaccf172d2::t_b4146904668f92 1-358
+backend/internal/infra/provider/web/security_test.go
+  s_8cefdaccf172d2::t_9bc2e5c343388d 57-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c9336564fadbf6fc3f5cd1af10b320af49440686",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

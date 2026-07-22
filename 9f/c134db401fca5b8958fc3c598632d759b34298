@@ -1,0 +1,29 @@
+backend/internal/infra/egress/tlsclient_test.go
+  s_8cefdaccf172d2::t_243390e70cb461 124
+  s_8cefdaccf172d2::t_a9abe3e78592a8 56,74,88,105-123
+backend/internal/infra/egress/tlsclient.go
+  s_8cefdaccf172d2::t_90632da67f28af 109,112,127-128
+backend/internal/infra/egress/manager.go
+  s_8cefdaccf172d2::t_083bdfa990a2ec 609
+  s_8cefdaccf172d2::t_3f546dbbfd7108 4,10,38-41,169,176-185,208,223-224,230-232,235,238-242,255-256,260,268,430-431,437-443,445-453,456-459,463-464,469-495,593-608,711
+  s_8cefdaccf172d2::t_83c3a5bbb81394 625-626,632-633,640,656-667,697-710
+backend/internal/infra/egress/manager_test.go
+  s_8cefdaccf172d2::t_b891d1a7c2593b 6,9
+  s_8cefdaccf172d2::t_ed2a4a4edbb53a 942-1284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "9fc134db401fca5b8958fc3c598632d759b34298",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "kimi-k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

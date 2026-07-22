@@ -1,0 +1,33 @@
+backend/internal/transport/http/account/handler_test.go
+  s_8cefdaccf172d2::t_35bf081e613233 9
+  s_8cefdaccf172d2::t_13acf64811f90f 18,217-254
+backend/internal/transport/http/account/handler.go
+  s_8cefdaccf172d2::t_32d55db9837068 194-195,482-487,492-495
+backend/internal/repository/account.go
+  s_8cefdaccf172d2::t_b7e5d9b61ff337 18-28,62-64
+backend/internal/infra/persistence/relational/account_repository.go
+  s_8cefdaccf172d2::t_584baf1ce19300 1145,1147-1150,1153,1155-1156,1158,1160-1165,1168-1177,1180-1182,1184-1192,1195-1197,1200-1203,1205-1217,1222
+backend/internal/application/account/service.go
+  s_8cefdaccf172d2::t_65bc202196fca2 137,140-150,518-519,521-524,529,532,536,539,541,544-557,559,561
+  s_8cefdaccf172d2::t_9337637e583e86 563,566
+backend/internal/application/account/account_cleanup_test.go
+  s_8cefdaccf172d2::t_e8d9fa47bd74f0 5,11,14,17,19,24,28-30,33,35-37,44,49,52-88,90-92,96-97,99-101,104-106,111,113-131
+backend/internal/infra/persistence/relational/account_cleanup_test.go
+  s_8cefdaccf172d2::t_70b50a7ca20ce9 1-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "19d58f4ed62c9d9237d227f80a50a435481c9fda",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
