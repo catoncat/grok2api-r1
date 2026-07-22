@@ -1,0 +1,21 @@
+backend/internal/application/egress/service_test.go
+  s_8cefdaccf172d2::t_db5ce43ec1522c 120,145,189
+frontend/src/features/settings/egress-nodes.tsx
+  s_8cefdaccf172d2::t_b408f42b61e510 25-28,111,122,161,178,183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b6b10a0321a92977c90ed16479ae1725503e328c",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
