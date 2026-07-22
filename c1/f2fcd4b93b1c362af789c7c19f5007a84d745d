@@ -1,0 +1,34 @@
+backend/internal/infra/persistence/relational/account_repository.go
+  s_8cefdaccf172d2::t_2fcfbc23b53e26 281-292,294-302,315-322
+  s_8cefdaccf172d2::t_e9ed92376d7671 323
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_8eea8db9916a4e 62-67,69
+  s_8cefdaccf172d2::t_db68d90c4b5dff 48-61
+backend/internal/app/startup.go
+  s_8cefdaccf172d2::t_23ce16c86baf81 16-20,272-276,298
+backend/internal/infra/persistence/relational/startup_bounded_test.go
+  s_8cefdaccf172d2::t_a8d98a7c1e16d2 1-59,62,68-78
+  s_8cefdaccf172d2::t_d7edb4242196ee 60-61,63-67
+backend/internal/application/egress/service_test.go
+  s_8cefdaccf172d2::t_db5ce43ec1522c 120,145,189
+frontend/src/features/settings/egress-nodes.tsx
+  s_8cefdaccf172d2::t_b408f42b61e510 25-28,111,122,161,178,183
+backend/internal/application/gateway/selector_plan.go
+  s_8cefdaccf172d2::t_e21b43a5a39c3c 8,191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c1f2fcd4b93b1c362af789c7c19f5007a84d745d",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

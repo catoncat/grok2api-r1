@@ -1,0 +1,45 @@
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_03f1372d42012c 308
+backend/internal/application/accountsync/service.go
+  s_8cefdaccf172d2::t_968105dfb4fc7f 21-24,37-38
+  s_8cefdaccf172d2::t_8f2bc799438476 39,60-68,77-80,270-280,282-290
+  s_8cefdaccf172d2::t_b87114389fd065 40
+backend/internal/infra/persistence/relational/build_super_entitlement_test.go
+  s_8cefdaccf172d2::t_336f123983207b 125-128
+backend/internal/infra/persistence/relational/model_capability_repository_test.go
+  s_8cefdaccf172d2::t_1a93d7ad869502 140-141,157,162-164
+  s_8cefdaccf172d2::t_90c2b6921ba6aa 165
+backend/internal/infra/persistence/relational/model_repository.go
+  s_8cefdaccf172d2::t_64f4e058c3b5a9 44,47
+  s_8cefdaccf172d2::t_624ae57de1f9ee 547-565,635
+backend/internal/application/gateway/service.go
+  s_8cefdaccf172d2::t_3458aed6d24684 48-49,117-120,127-148,176
+  s_8cefdaccf172d2::t_8646aaccb036c9 250
+  s_8cefdaccf172d2::t_9bc761653f7a18 182-249,251
+backend/internal/application/model/service.go
+  s_8cefdaccf172d2::t_0c83afcba6fbd8 130-133
+backend/internal/repository/model.go
+  s_8cefdaccf172d2::t_cec215856e6f13 31-33
+backend/internal/application/accountsync/service_test.go
+  s_8cefdaccf172d2::t_6e04c7324918b8 458-532
+backend/internal/application/gateway/build_model_verification_test.go
+  s_8cefdaccf172d2::t_a53d8d594bd48d 1-293
+backend/internal/infra/persistence/relational/account_cleanup_postgres_test.go
+  s_8cefdaccf172d2::t_5d3686ae33ecdd 1-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "02c5dc65f8a068565b349179bad8ac9ab3418bcf",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

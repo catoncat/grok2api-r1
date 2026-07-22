@@ -1,0 +1,19 @@
+frontend/src/shared/components/site-footer.tsx
+  s_8cefdaccf172d2::t_1300c70c55dc6b 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d40fcaa353ca37da682984d886fef8d8e0fb0624",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

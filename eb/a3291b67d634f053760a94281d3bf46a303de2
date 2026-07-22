@@ -1,0 +1,28 @@
+frontend/src/features/settings/settings-page.tsx
+  s_8cefdaccf172d2::t_3c0a462c8211ca 73
+  s_8cefdaccf172d2::t_df9f465dc65cde 147
+frontend/src/shared/i18n/index.ts
+  s_8cefdaccf172d2::t_951c7def5e2a5c 763
+backend/internal/transport/http/settings/security_test.go
+  s_8cefdaccf172d2::t_cdaa2613a16a22 65-78
+frontend/src/features/settings/settings-model.ts
+  s_8cefdaccf172d2::t_c753bf34e6b25c 84
+frontend/src/features/settings/settings-api.ts
+  s_8cefdaccf172d2::t_5ce0f7f2276655 15,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "eba3291b67d634f053760a94281d3bf46a303de2",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
