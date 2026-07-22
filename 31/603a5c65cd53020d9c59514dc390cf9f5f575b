@@ -1,0 +1,55 @@
+backend/internal/transport/http/account/handler_test.go
+  s_8cefdaccf172d2::t_35bf081e613233 9
+  s_8cefdaccf172d2::t_13acf64811f90f 18,217-254
+backend/internal/transport/http/account/handler.go
+  s_8cefdaccf172d2::t_32d55db9837068 194-195,482-487,492-495
+backend/internal/repository/account.go
+  s_8cefdaccf172d2::t_b7e5d9b61ff337 18-28,62-64
+backend/internal/infra/persistence/relational/account_repository.go
+  s_8cefdaccf172d2::t_584baf1ce19300 1145,1147-1150,1153,1155-1156,1158,1160-1165,1168-1177,1180-1182,1184-1192,1195-1197,1200-1203,1205-1217,1222
+backend/internal/application/account/service.go
+  s_8cefdaccf172d2::t_65bc202196fca2 137,140-150,518-519,521-524,529,532,536,539,541,544-557,559,561
+  s_8cefdaccf172d2::t_9337637e583e86 563,566
+backend/internal/application/account/account_cleanup_test.go
+  s_8cefdaccf172d2::t_e8d9fa47bd74f0 5,11,14,17,19,24,28-30,33,35-37,44,49,52-88,90-92,96-97,99-101,104-106,111,113-131
+backend/internal/infra/persistence/relational/account_cleanup_test.go
+  s_8cefdaccf172d2::t_70b50a7ca20ce9 1-149
+backend/internal/application/gateway/failure.go
+  s_8cefdaccf172d2::t_381fa1314339aa 24,188-194
+  s_8cefdaccf172d2::t_9635bf4f8500f2 112
+  s_b0b2beb596d95a::t_56daec564f9973 195-196
+backend/internal/application/gateway/service_test.go
+  s_8cefdaccf172d2::t_fa783729d9c87a 924,927-928
+  s_8cefdaccf172d2::t_7d823d71355f06 929
+backend/internal/application/gateway/selector.go
+  s_8cefdaccf172d2::t_87e7ee02229d03 36-39,528-538
+  s_b0b2beb596d95a::t_7856258e8a47ff 539-542
+backend/internal/application/gateway/service.go
+  s_b0b2beb596d95a::t_8772861e830dae 656-669,672,724-728,747-749
+backend/internal/application/gateway/failure_test.go
+  s_8cefdaccf172d2::t_1a8bdf15b3da25 18,25-34,43-50,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "31603a5c65cd53020d9c59514dc390cf9f5f575b",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_b0b2beb596d95a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8537-a545-7ce5-ae3e-d9e47fb07df2",
+        "model": "qwen3.8-max-preview"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

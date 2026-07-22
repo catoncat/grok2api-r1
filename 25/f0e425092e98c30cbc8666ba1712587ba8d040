@@ -1,0 +1,41 @@
+backend/internal/transport/http/settings/handler.go
+  s_8cefdaccf172d2::t_61288bcb1d694b 42,182-183,235-236
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_e03aa987bca0af 297,340,393
+backend/internal/infra/provider/console/adapter.go
+  s_8cefdaccf172d2::t_c1c83df4fd957b 26
+backend/internal/infra/config/config_test.go
+  s_8cefdaccf172d2::t_13fa523f326788 89,110-111,184
+backend/internal/application/egress/service_test.go
+  s_8cefdaccf172d2::t_703aee8bdabf55 77,87,92,97,102,105-107
+  s_8cefdaccf172d2::t_1c328764e0c40f 108
+backend/internal/domain/settings/settings.go
+  s_8cefdaccf172d2::t_48e90595e78051 31
+backend/internal/application/settings/service_test.go
+  s_8cefdaccf172d2::t_86321f65e74d22 56,79,89
+backend/internal/application/settings/service.go
+  s_8cefdaccf172d2::t_55a5e5f6259675 62,436,512-513
+  s_8cefdaccf172d2::t_ee18f3434a108b 302-303,306-307,361-362
+backend/internal/infra/config/config.go
+  s_8cefdaccf172d2::t_620b702278d3cb 475-477
+  s_8cefdaccf172d2::t_d9ea26de351c02 159-161,578
+backend/internal/application/egress/service.go
+  s_8cefdaccf172d2::t_9a0ed3dfcebc3b 9,45-47,56-64,74-75,77-78,184-186,240-244
+  s_8cefdaccf172d2::t_b2e2154afa7dbf 245-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "25f0e425092e98c30cbc8666ba1712587ba8d040",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

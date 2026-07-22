@@ -1,0 +1,58 @@
+backend/internal/infra/persistence/relational/account_repository.go
+  s_8cefdaccf172d2::t_2fcfbc23b53e26 281-292,294-302,315-322
+  s_8cefdaccf172d2::t_e9ed92376d7671 323
+  s_8cefdaccf172d2::t_2e176862ca39cb 1543,1561-1563,1570-1571
+backend/internal/app/application.go
+  s_8cefdaccf172d2::t_8eea8db9916a4e 67-72,74
+  s_8cefdaccf172d2::t_db68d90c4b5dff 53-66
+  s_8cefdaccf172d2::t_edd3c11278d40c 46-50,225,228,263
+backend/internal/app/startup.go
+  s_8cefdaccf172d2::t_23ce16c86baf81 16-20,272-276,298
+backend/internal/infra/persistence/relational/startup_bounded_test.go
+  s_8cefdaccf172d2::t_a8d98a7c1e16d2 1-59,62,68-78
+  s_8cefdaccf172d2::t_d7edb4242196ee 60-61,63-67
+backend/internal/application/egress/service_test.go
+  s_8cefdaccf172d2::t_db5ce43ec1522c 120,145,189
+frontend/src/features/settings/egress-nodes.tsx
+  s_8cefdaccf172d2::t_b408f42b61e510 25-28,111,122,161,178,183
+backend/internal/application/gateway/selector_plan.go
+  s_8cefdaccf172d2::t_e21b43a5a39c3c 8,191
+backend/internal/infra/egress/manager.go
+  s_8cefdaccf172d2::t_0f8bedce59af9e 600
+  s_8cefdaccf172d2::t_47e0fbb46188c3 68,595-599
+backend/internal/infra/egress/tlsclient.go
+  s_8cefdaccf172d2::t_4ff089d4ed67b4 153
+  s_8cefdaccf172d2::t_986f2cc5a00f67 9,16,146-152
+backend/internal/infra/egress/sticky_retry_test.go
+  s_8cefdaccf172d2::t_a36b0dba1b8f74 11-12,116-136
+  s_8cefdaccf172d2::t_97d31bab24a772 137-138
+backend/internal/infra/egress/manager_test.go
+  s_8cefdaccf172d2::t_7dc9a504ac4e62 38-42
+  s_8cefdaccf172d2::t_9c09c6a62dddff 22-37,43-54
+backend/internal/infra/provider/web/chat.go
+  s_8cefdaccf172d2::t_309afd7dff5a57 309
+backend/internal/infra/provider/web/image.go
+  s_8cefdaccf172d2::t_453d6c6a4768d4 423,465,691-695,1228,1443,1797
+backend/internal/infra/persistence/relational/console_provider_test.go
+  s_8cefdaccf172d2::t_fc8ff892b33746 5
+  s_8cefdaccf172d2::t_397241564dd3d5 98,113
+  s_8cefdaccf172d2::t_2cab2e19873c19 116,130,145
+  s_8cefdaccf172d2::t_1814186552dc56 154-196
+  s_8cefdaccf172d2::t_e28ce9ec2aaee9 197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f7ed25a8899788efcaad9e988349d417b4bb56a7",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

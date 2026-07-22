@@ -1,0 +1,26 @@
+frontend/src/features/accounts/accounts-api.ts
+  s_8cefdaccf172d2::t_9b9219a93c3af6 9-16,205-207,473-474
+frontend/src/features/accounts/account-quota.tsx
+  s_8cefdaccf172d2::t_28c818853c9277 106-113,116-142,192,200
+frontend/src/features/accounts/accounts-page.tsx
+  s_8cefdaccf172d2::t_98186c448a6782 66,96-97,128,477,479-482,485,541-543
+  s_8cefdaccf172d2::t_b8aa5081fb2a28 1151,1155,1167-1174,1180-1189,1192-1196
+frontend/src/shared/i18n/index.ts
+  s_8cefdaccf172d2::t_31aa80ca8dfe49 548-552,554-555,1151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c447b44384b02488a4843e58ddfda8b5a78cb5e6",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
