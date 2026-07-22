@@ -1,0 +1,19 @@
+backend/internal/application/gateway/selector_plan.go
+  s_8cefdaccf172d2::t_e21b43a5a39c3c 8,191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e3a484bb355761204ba02638cf00a57568eff257",
+  "prompts": {},
+  "sessions": {
+    "s_8cefdaccf172d2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
