@@ -1,0 +1,44 @@
+backend/internal/infra/persistence/relational/list_filter_repository_test.go
+  s_e586d45d714a4a::t_decd900a7af485 47-48
+backend/internal/application/account/quota_test.go
+  s_e586d45d714a4a::t_7fbc94e205caf2 62-64
+  s_e586d45d714a4a::t_4e8780af5b76c1 50,56-61
+  s_a874e96137b84a::t_c7ec233518ce73 65
+backend/internal/domain/account/account.go
+  s_e586d45d714a4a::t_8460d088ac4aff 6,311,314,316-350
+  s_a874e96137b84a::t_4f20d3e672ff08 351
+backend/internal/infra/provider/console/headers.go
+  s_e586d45d714a4a::t_5e4dfe304b2abd 1-8,11-17,40-91
+backend/internal/infra/provider/console/console_test.go
+  s_e586d45d714a4a::t_d062b9062e5a77 315-319,356-365
+backend/internal/application/account/service.go
+  s_e586d45d714a4a::t_49c6572a60986d 471-476,506-511
+backend/internal/infra/persistence/relational/account_repository.go
+  s_e586d45d714a4a::t_69b915e81a5f29 27-31
+backend/internal/domain/account/account_test.go
+  s_e586d45d714a4a::t_436b1ac946515c 29,31,34,56,63-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f15b735afd1623ab3a05d8a965859dc9e7911a73",
+  "prompts": {},
+  "sessions": {
+    "s_a874e96137b84a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f76b0-7757-7803-9934-3a26afd3213b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e586d45d714a4a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f769f-32ea-7ee0-919c-c10eea13b601",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

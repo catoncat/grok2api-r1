@@ -1,0 +1,23 @@
+backend/internal/infra/provider/console/console_test.go
+  s_5dd25c26ca862e::t_299eaa22ed9f1c 187-189
+backend/internal/infra/provider/console/normalize.go
+  s_5dd25c26ca862e::t_299eaa22ed9f1c 304,306
+backend/internal/application/gateway/service_test.go
+  s_5dd25c26ca862e::t_299eaa22ed9f1c 693,695-697,700
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "67925ae523608934c6d6ab27cbe1ebceeed5924f",
+  "prompts": {},
+  "sessions": {
+    "s_5dd25c26ca862e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6dc2-4030-7111-a54d-9db7d293f862",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

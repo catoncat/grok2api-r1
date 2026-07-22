@@ -7,42 +7,81 @@ backend/internal/infra/egress/manager.go
   s_8cefdaccf172d2::t_083bdfa990a2ec 611
   s_8cefdaccf172d2::t_3f546dbbfd7108 4,10,38-41,165,172-181,204,219-220,226-228,231,234-238,251-252,256,264,426-427,433-439,441-449,452-455,459-460,465-491,589-594,601-610,713
   s_8cefdaccf172d2::t_83c3a5bbb81394 627-628,634-635,642,658-669,699-712
+  s_66f58e62c51c03::t_57c937799b4469 627-628
+  s_66f58e62c51c03::t_99a73cf0a29130 4,449,452,454,469-492
+  s_66f58e62c51c03::t_6cdf14980a3860 659-669
+  s_66f58e62c51c03::t_91327d645c1dfe 493
 backend/internal/infra/egress/manager_test.go
   s_8cefdaccf172d2::t_b891d1a7c2593b 6,9
   s_8cefdaccf172d2::t_ed2a4a4edbb53a 975-1317
+  s_66f58e62c51c03::t_57c937799b4469 1246,1249-1270
+  s_66f58e62c51c03::t_6cdf14980a3860 1209,1222-1223,1228-1245,1247
+  s_66f58e62c51c03::t_32d0a8d131e61c 9
+  s_66f58e62c51c03::t_c68894f72d82ba 6,976-985,992-994,997-999,1001-1003,1008-1010,1018-1019,1022-1024,1026,1036,1038
+  s_66f58e62c51c03::t_272a27e69794c9 1248
 backend/internal/infra/provider/web/statsig_shim.js
   s_8cefdaccf172d2::t_ce661a9cce823d 1-216
 backend/internal/infra/provider/web/statsig.go
   s_8cefdaccf172d2::t_8ed46ae1cea8f8 8,20,29-32,35-40,48-54,56,59-62,65-66,74-79,81-99,112-116,120-127,129,131-134,136-139,141-151,154-156,158,161-164,166,170,173-200,202-203,205-206,209-213,215-223,225-228,234-236,240,245,247,250,253-291,294,297-314,320,331-367,370-382,385,391,466,534,536,543,545,548,550,552-563,565,568,571-579,600,603,606-613
+  s_66f58e62c51c03::t_99a73cf0a29130 29,31,49-51,136-138,141-143,145-150,154,173,175,177,182,192,198,200,202,240,245,247,256,259-267,276,291,320
+  s_66f58e62c51c03::t_03570359b3481b 8,79,86,101,176,179-181,183-191,193-197,199,227,236,250,253,309,312-314,331
+  s_66f58e62c51c03::t_d1f9a5714a7c45 579,600
+  s_66f58e62c51c03::t_107506bfa8cafe 48,127,162,170,174,205,212,378-382,385,391
+  s_66f58e62c51c03::t_d96989912fb559 30,74,112,156,178,254-255,257-258,273-275,277,289
+  s_66f58e62c51c03::t_18645f2d1466f8 32,78,113,213-214,226,234,563,565
+  s_66f58e62c51c03::t_57c937799b4469 20,536,543,545,548
 backend/internal/infra/provider/web/quota_test.go
   s_8cefdaccf172d2::t_263e461c150050 107,135,254
+  s_66f58e62c51c03::t_32d0a8d131e61c 107,135,254
 backend/internal/infra/provider/web/statsig_test.go
   s_8cefdaccf172d2::t_b99e215b575cd0 11,13-14,19,26-31,42-114,191-192,212-213,216,220,224-225,227,231-232,235-236,240-241,244-246,249-250,280,284,287,290-557,567-569,576,578-591,595,598-620,631,635-637
+  s_66f58e62c51c03::t_e3771a1dab6868 336,479-507,603
+  s_66f58e62c51c03::t_57c937799b4469 19,568-569,635-636
+  s_66f58e62c51c03::t_c68894f72d82ba 338-478
+  s_66f58e62c51c03::t_2ac5d60a843f8c 13-14,26-31,191-192,212-213,216,220,224-225,227,231-232,235-236,240-241,244-246,249-250,280,287,290-335,576,578-591,595,598-601
+  s_66f58e62c51c03::t_18645f2d1466f8 602,605-620,637
+  s_66f58e62c51c03::t_f23ff03174d152 508-557
+  s_66f58e62c51c03::t_8abf038f16848d 337
+  s_66f58e62c51c03::t_ab08fdb8b6b4fe 604
 backend/internal/infra/provider/web/statsig_discovery_test.go
   s_8cefdaccf172d2::t_e8828d8d2a116b 1-206
 backend/internal/infra/provider/web/image.go
   s_8cefdaccf172d2::t_497382b3774222 1376-1379
+  s_66f58e62c51c03::t_5a73afc6bcf4ab 1586
+  s_66f58e62c51c03::t_31a394e4c68ee6 1598
+  s_66f58e62c51c03::t_57c937799b4469 1377-1379
 backend/go.mod
   s_8cefdaccf172d2::t_bc74569f0b4bf4 10,41,53,56
 backend/internal/infra/provider/provider.go
   s_8cefdaccf172d2::t_16835c479124cb 23
+  s_66f58e62c51c03::t_57c937799b4469 23
 backend/internal/infra/provider/web/account_settings.go
   s_8cefdaccf172d2::t_abaae0b94d4c46 183-186
 backend/internal/infra/provider/web/chat.go
   s_8cefdaccf172d2::t_ec28d80f4c84d5 347
   s_8cefdaccf172d2::t_c66ede8a5092d6 348-351
+  s_66f58e62c51c03::t_57c937799b4469 348-351
 backend/internal/infra/provider/web/statsig_engine_parse_test.go
   s_8cefdaccf172d2::t_5da4956c5df4cf 1-53
 backend/internal/infra/provider/web/statsig_engine.go
   s_8cefdaccf172d2::t_0237c0f8a89db4 1-749
 backend/internal/infra/provider/web/protocol_test.go
   s_8cefdaccf172d2::t_a707c703c74059 306,367
+  s_66f58e62c51c03::t_9ad7eeb1d58341 1077-1079
+  s_66f58e62c51c03::t_5a73afc6bcf4ab 1071
+  s_66f58e62c51c03::t_32d0a8d131e61c 306
+  s_66f58e62c51c03::t_cb39aa31ff85c7 1063-1065
+  s_66f58e62c51c03::t_1d7c0e674e4261 9
+  s_66f58e62c51c03::t_35bcf80d3b6932 1026,1034,1042-1044
 backend/internal/infra/provider/web/quota.go
   s_8cefdaccf172d2::t_dcc65b8a40c715 152-154
+  s_66f58e62c51c03::t_57c937799b4469 153-154
 backend/go.sum
   s_8cefdaccf172d2::t_e306a0bc85268a 3-4,43-46,79-80,90-91
 backend/internal/infra/provider/web/statsig_local_test.go
   s_8cefdaccf172d2::t_5a068e65019f3f 1-229
+backend/internal/application/gateway/service_test.go
+  s_66f58e62c51c03::t_0a4f647948f502 776,778-789,797,799-800,807-810,812-815,817,821-830,833,835-837,840,842-843,850,852-854,857-859
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -50,6 +89,14 @@ backend/internal/infra/provider/web/statsig_local_test.go
   "base_commit_sha": "b25bc5e7e570eea782d5c54e19481b43ef667497",
   "prompts": {},
   "sessions": {
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
     "s_8cefdaccf172d2": {
       "agent_id": {
         "tool": "pi",

@@ -10,6 +10,7 @@ backend/internal/infra/provider/web/protocol_test.go
 backend/internal/infra/provider/web/chat.go
   s_8cefdaccf172d2::t_dea694f791794a 38-41,170-173,175-192,206-217,219,237,240-244,251,259-263,270,273-275,307-308,312-318,352,358,398-399,401,433,497-501,1003-1006,1016-1047
   s_8cefdaccf172d2::t_cef7bb69297f26 1048
+  s_a917cebefb0e3d::t_800fa193557634 170,173,179-180,189-192,352,358,401
 backend/internal/infra/provider/web/quota_test.go
   s_8cefdaccf172d2::t_5fa788ad2711c1 12,17
   s_8cefdaccf172d2::t_98e9329502b792 18,259-312
@@ -22,10 +23,19 @@ backend/internal/infra/provider/web/image.go
   s_8cefdaccf172d2::t_e7bebedfe23696 1645-1651
   s_8cefdaccf172d2::t_2ac9134889a01e 446-453,456
   s_8cefdaccf172d2::t_e035abf8306c5b 800,1296,1398,1401
+  s_a917cebefb0e3d::t_0fbcf51b326e32 396-398
+  s_a917cebefb0e3d::t_334db3f88f4911 394
 backend/internal/infra/provider/web/chat_statsig_egress_test.go
   s_8cefdaccf172d2::t_b4146904668f92 1-358
+  s_a917cebefb0e3d::t_cdd97fb1b776cc 221
+  s_a917cebefb0e3d::t_002f66589bee0a 199-220,222-226
+  s_a917cebefb0e3d::t_9487290b09dac3 1-55,148-191,196-198,227-229,237-242,244-294,302-358
 backend/internal/infra/provider/web/security_test.go
   s_8cefdaccf172d2::t_9bc2e5c343388d 57-106
+backend/internal/infra/provider/web/statsig.go
+  s_a917cebefb0e3d::t_74907d7fac373e 89-101,466,568
+backend/internal/infra/egress/manager.go
+  s_a917cebefb0e3d::t_168b9832ffcd53 165,172-181,204,231-233
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -38,6 +48,14 @@ backend/internal/infra/provider/web/security_test.go
         "tool": "pi",
         "id": "019f8366-9023-7360-a758-0e50abd66ecf",
         "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a917cebefb0e3d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f7d59-116d-7802-ade0-1a3cbd31aea0",
+        "model": "gpt-5.6-sol"
       },
       "human_author": "cat <git@chen.rs>"
     }

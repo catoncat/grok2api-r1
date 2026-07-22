@@ -1,0 +1,21 @@
+backend/internal/infra/egress/manager.go
+  s_66f58e62c51c03::t_581ad0587d2db1 219-220,251-252,256,264
+backend/internal/infra/egress/manager_test.go
+  s_66f58e62c51c03::t_581ad0587d2db1 1025-1043,1297-1315
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "fbd8e862d1285b6f68c9122619130e11c10bf2b1",
+  "prompts": {},
+  "sessions": {
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

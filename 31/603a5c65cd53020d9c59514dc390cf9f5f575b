@@ -18,6 +18,8 @@ backend/internal/application/gateway/failure.go
   s_8cefdaccf172d2::t_381fa1314339aa 24,188-194
   s_8cefdaccf172d2::t_9635bf4f8500f2 112
   s_b0b2beb596d95a::t_56daec564f9973 195-196
+  s_5dd25c26ca862e::t_a6a8a0da2ad0c4 112,190-193
+  s_5dd25c26ca862e::t_cbd133ed87e289 195-196
 backend/internal/application/gateway/service_test.go
   s_8cefdaccf172d2::t_fa783729d9c87a 924,927-928
   s_8cefdaccf172d2::t_7d823d71355f06 929
@@ -28,6 +30,7 @@ backend/internal/application/gateway/service.go
   s_b0b2beb596d95a::t_8772861e830dae 656-669,672,724-728,747-749
 backend/internal/application/gateway/failure_test.go
   s_8cefdaccf172d2::t_1a8bdf15b3da25 18,25-34,43-50,59
+  s_5dd25c26ca862e::t_a6a8a0da2ad0c4 26,43-50
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -35,6 +38,14 @@ backend/internal/application/gateway/failure_test.go
   "base_commit_sha": "31603a5c65cd53020d9c59514dc390cf9f5f575b",
   "prompts": {},
   "sessions": {
+    "s_5dd25c26ca862e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6dc2-4030-7111-a54d-9db7d293f862",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
     "s_8cefdaccf172d2": {
       "agent_id": {
         "tool": "pi",

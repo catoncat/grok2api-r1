@@ -1,0 +1,19 @@
+backend/internal/application/gateway/failure_test.go
+  s_5dd25c26ca862e::t_1078602fbd7e0e 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "87abeed580968b66262a4a1b95d596c28e239f2e",
+  "prompts": {},
+  "sessions": {
+    "s_5dd25c26ca862e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6dc2-4030-7111-a54d-9db7d293f862",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

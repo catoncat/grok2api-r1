@@ -1,0 +1,31 @@
+backend/internal/infra/egress/manager.go
+  s_54653f60ac62a9::t_419fcb37b722db 492-493,498,499
+  s_54653f60ac62a9::t_ae37976173f055 528-529
+backend/internal/infra/egress/manager_test.go
+  s_54653f60ac62a9::t_419fcb37b722db 466-469,471,473-475,488-490,494,496,518,521-523
+  s_54653f60ac62a9::t_7ca9683a0095eb 513
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "505c0b3e83cce2ef6e32df57878be37eafee9b6f",
+  "prompts": {},
+  "sessions": {
+    "s_54653f60ac62a9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a96-6b17-7360-ae10-e0d870c833f3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_7a8044ccc00ff5": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f6dba-bf8a-7fd2-a74f-b51cda86efb9",
+        "model": "grok-4.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

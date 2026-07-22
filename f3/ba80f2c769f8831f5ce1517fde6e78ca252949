@@ -1,9 +1,11 @@
 backend/internal/app/application.go
   s_8cefdaccf172d2::t_03f1372d42012c 308
+  s_e586d45d714a4a::t_46d06de5e7fbe9 308
 backend/internal/application/accountsync/service.go
   s_8cefdaccf172d2::t_968105dfb4fc7f 21-24,37-38
   s_8cefdaccf172d2::t_8f2bc799438476 39,60-68,77-80,270-280,282-290
   s_8cefdaccf172d2::t_b87114389fd065 40
+  s_e586d45d714a4a::t_219629991dd5f6 21-24,37-40,60-68,270,272-280,284-290
 backend/internal/infra/persistence/relational/build_super_entitlement_test.go
   s_8cefdaccf172d2::t_336f123983207b 125-128
 backend/internal/infra/persistence/relational/model_capability_repository_test.go
@@ -12,18 +14,29 @@ backend/internal/infra/persistence/relational/model_capability_repository_test.g
 backend/internal/infra/persistence/relational/model_repository.go
   s_8cefdaccf172d2::t_64f4e058c3b5a9 44,47
   s_8cefdaccf172d2::t_624ae57de1f9ee 547-565,635
+  s_e586d45d714a4a::t_51477450bd56a0 547-565
 backend/internal/application/gateway/service.go
   s_8cefdaccf172d2::t_3458aed6d24684 48-49,117-120,127-148,176
   s_8cefdaccf172d2::t_8646aaccb036c9 250
   s_8cefdaccf172d2::t_9bc761653f7a18 182-249,251
+  s_e586d45d714a4a::t_642c9617dedfef 48-49,117-120,127-135,137-148,176,182-241,243-250
+  s_e586d45d714a4a::t_4dee8d8ea4a929 242
+  s_e586d45d714a4a::t_3b7d66cd449c61 251
 backend/internal/application/model/service.go
   s_8cefdaccf172d2::t_0c83afcba6fbd8 130-133
+  s_e586d45d714a4a::t_a4b8efe4777d47 130-133
 backend/internal/repository/model.go
   s_8cefdaccf172d2::t_cec215856e6f13 31-33
 backend/internal/application/accountsync/service_test.go
   s_8cefdaccf172d2::t_6e04c7324918b8 458-532
+  s_e586d45d714a4a::t_cefe0b81a70ab4 180,183,187-189,193,196-198
+  s_e586d45d714a4a::t_e26ce194860bf6 163,165,167-168,174-176
 backend/internal/application/gateway/build_model_verification_test.go
   s_8cefdaccf172d2::t_a53d8d594bd48d 1-293
+  s_e586d45d714a4a::t_2913f8f9cd1963 170-172,196,198-199,201-204,208-213
+  s_e586d45d714a4a::t_64c0de60cc6666 176-177
+  s_e586d45d714a4a::t_291b012f6c3759 1-88,90-114,116-169,173-175,178-195,197,200,205-207,214-293
+  s_e586d45d714a4a::t_747733e544418f 89,115
 backend/internal/infra/persistence/relational/account_cleanup_postgres_test.go
   s_8cefdaccf172d2::t_5d3686ae33ecdd 1-138
 ---
@@ -38,6 +51,14 @@ backend/internal/infra/persistence/relational/account_cleanup_postgres_test.go
         "tool": "pi",
         "id": "019f8366-9023-7360-a758-0e50abd66ecf",
         "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e586d45d714a4a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f769f-32ea-7ee0-919c-c10eea13b601",
+        "model": "gpt-5.6-sol"
       },
       "human_author": "cat <git@chen.rs>"
     }

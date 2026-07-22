@@ -3,11 +3,20 @@ backend/internal/infra/provider/console/headers.go
 backend/internal/infra/provider/console/normalize.go
   s_8cefdaccf172d2::t_901ee5bc303e0f 47-49,262,268,273-274,276-278,280,292-298,300,310-311,313-315,331-335,353-424
   s_8cefdaccf172d2::t_adb7b5a3211285 425
+  s_5dd25c26ca862e::t_93895fb603e91c 268,274,276-278,280,384-394
+  s_5dd25c26ca862e::t_2548cec1489dac 395-396
 backend/internal/infra/provider/console/adapter.go
   s_8cefdaccf172d2::t_237161fca499d6 146
 backend/internal/infra/provider/console/console_test.go
   s_8cefdaccf172d2::t_a14e464c83cf5a 502-604,662
   s_8cefdaccf172d2::t_279700c0e62d33 226-325
+  s_5dd25c26ca862e::t_93895fb603e91c 254-284
+backend/internal/application/gateway/service_test.go
+  s_5dd25c26ca862e::t_93895fb603e91c 861,863-873,875,877-882,890-891,897-898,901-906,912-916,919,929-931
+backend/internal/application/gateway/selector.go
+  s_5dd25c26ca862e::t_93895fb603e91c 38,528-538
+  s_5dd25c26ca862e::t_9de7036ff98250 539-541
+  s_5dd25c26ca862e::t_f334cf76fa8ae7 542
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -15,6 +24,14 @@ backend/internal/infra/provider/console/console_test.go
   "base_commit_sha": "ee577cc7a18f4d281b19a6ba3e9bc9b13dcc8c98",
   "prompts": {},
   "sessions": {
+    "s_5dd25c26ca862e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6dc2-4030-7111-a54d-9db7d293f862",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
     "s_8cefdaccf172d2": {
       "agent_id": {
         "tool": "pi",

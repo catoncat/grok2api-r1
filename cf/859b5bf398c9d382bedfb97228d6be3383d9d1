@@ -1,0 +1,17 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "cf859b5bf398c9d382bedfb97228d6be3383d9d1",
+  "prompts": {},
+  "sessions": {
+    "s_a917cebefb0e3d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f7d59-116d-7802-ade0-1a3cbd31aea0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

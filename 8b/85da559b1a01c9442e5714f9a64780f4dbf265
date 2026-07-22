@@ -2,6 +2,7 @@ backend/NOTICE
   s_8cefdaccf172d2::t_e40a871404db47 1-24
 backend/internal/application/updatecheck/service_test.go
   s_8cefdaccf172d2::t_68d0a2cdc425fa 38-48
+  s_e586d45d714a4a::t_e8f02a105f443f 38-39,41,43,45-48
 VERSION
   s_8cefdaccf172d2::t_4235e0a0ab0a80 1
 ---
@@ -15,6 +16,22 @@ VERSION
       "agent_id": {
         "tool": "pi",
         "id": "019f8366-9023-7360-a758-0e50abd66ecf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a917cebefb0e3d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f7d59-116d-7802-ade0-1a3cbd31aea0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e586d45d714a4a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f769f-32ea-7ee0-919c-c10eea13b601",
         "model": "gpt-5.6-sol"
       },
       "human_author": "cat <git@chen.rs>"

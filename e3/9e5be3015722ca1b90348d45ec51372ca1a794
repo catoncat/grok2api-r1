@@ -1,0 +1,21 @@
+frontend/src/features/accounts/accounts-api.ts
+  s_e586d45d714a4a::t_4ec51eee7db3e9 46,147
+frontend/src/features/accounts/account-quota.tsx
+  s_e586d45d714a4a::t_86dc7c6f02e36c 60-62,65,67,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e39e5be3015722ca1b90348d45ec51372ca1a794",
+  "prompts": {},
+  "sessions": {
+    "s_e586d45d714a4a": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f769f-32ea-7ee0-919c-c10eea13b601",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

@@ -1,0 +1,44 @@
+backend/internal/transport/http/account/handler_test.go
+  s_a917cebefb0e3d::t_555f5c5f42fa8c 9,17-18
+backend/internal/transport/http/account/handler.go
+  s_a917cebefb0e3d::t_f209b46f5a93fc 152,191-197
+backend/internal/infra/persistence/relational/account_repository.go
+  s_a917cebefb0e3d::t_d2f81e3111ce5f 7,1145-1158,1165-1172,1174-1178,1189-1190,1193-1195,1201-1206,1208-1209,1211-1214,1216-1224,1226,1229,1231,1233,1239-1242
+  s_a917cebefb0e3d::t_d2f4d2acca1e7e 1160-1164,1179-1188,1191-1192,1207,1210,1215
+  s_a917cebefb0e3d::t_8e2e70e4f8bf12 1243
+backend/internal/application/account/service.go
+  s_a917cebefb0e3d::t_ee81d4080cb9a1 518-549,552-562,566-567
+  s_a917cebefb0e3d::t_4a4d27a8292e15 550-551
+  s_a917cebefb0e3d::t_1ac99506267ba2 568
+backend/internal/application/account/account_cleanup_test.go
+  s_a917cebefb0e3d::t_c0e5a142ee0df5 1-13,15-77,79-95,97-99,101-133
+  s_a917cebefb0e3d::t_85b32a8bb56b7c 14,100
+  s_a917cebefb0e3d::t_4a780467fa2a56 78,96
+backend/internal/infra/persistence/relational/account_cleanup_test.go
+  s_a917cebefb0e3d::t_f16de82fd8ef8e 12,61-84,89-103
+  s_a917cebefb0e3d::t_09086d8e30cd33 1-4,6-10,13,106-120,125-128,130-142,144-149
+  s_a917cebefb0e3d::t_370d0261291344 41,53,129,143
+  s_a917cebefb0e3d::t_e373f84bf803fa 5,11,14-40,42-52,54-60,104-105
+  s_a917cebefb0e3d::t_57bf8dd613d901 85-88
+  s_a917cebefb0e3d::t_a909f2828d7a44 121-124
+backend/internal/repository/account.go
+  s_a917cebefb0e3d::t_5148b989298577 18
+  s_a917cebefb0e3d::t_aa2dd724e2674d 21-23,26-28,64
+  s_a917cebefb0e3d::t_b56f7bd1ecad37 19-20,24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "665683e3869f59264252873eedc9dd35e1cbbdbf",
+  "prompts": {},
+  "sessions": {
+    "s_a917cebefb0e3d": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f7d59-116d-7802-ade0-1a3cbd31aea0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}

@@ -1,5 +1,6 @@
 backend/internal/app/application.go
   s_8cefdaccf172d2::t_744b5bf7bc2eb9 115-140,186-189,338
+  s_ad33ef1498ecf2::t_43d2faac6a81ac 115,117-132,134-140,187-189
 backend/internal/infra/media/s3_store.go
   s_8cefdaccf172d2::t_87529cb4fa324a 27,39,49,79,103,121,134-135,137-154,161,166,173,202-203
   s_8cefdaccf172d2::t_e92348e9bf522c 24-26
@@ -15,24 +16,39 @@ backend/internal/infra/media/s3_store.go
   s_8cefdaccf172d2::t_15ee53d74a48fc 167-172
   s_8cefdaccf172d2::t_91dd0a62a96edd 174-176,199-201
   s_8cefdaccf172d2::t_08b8dc11875395 1-23,31-35,43-45,53-75,83-99,107-117,125-130,177-198
+  s_ad33ef1498ecf2::t_4e15f27a6d7038 1-10,12-20,29-32,36,39-73,77-91,93-136,155-174,176,184-185,188,192
 backend/internal/infra/config/config.go
   s_8cefdaccf172d2::t_74691fd91da6d5 181,188-197,386-387,389,392-398
   s_8cefdaccf172d2::t_a96f2be9a3e6fd 399
+  s_ad33ef1498ecf2::t_c51198c0c1fa00 181,188-197,386-388,392-398
 backend/internal/application/media/service.go
   s_8cefdaccf172d2::t_554d2ce66cd58a 34-38,44,144-147,149-156,160-164
   s_8cefdaccf172d2::t_8cec6d53ce7c34 165
+  s_ad33ef1498ecf2::t_384dba036bd16b 44,144-147,149-156,160-164
+  s_ad33ef1498ecf2::t_4aa3a8da8964be 165
 backend/internal/app/startup.go
   s_8cefdaccf172d2::t_6f8aa25e9720d1 116,126,144-153
 backend/go.mod
   s_8cefdaccf172d2::t_68debb57638f98 6-9,37-50
+  s_ad33ef1498ecf2::t_aee9c531ded881 6-9,37-50
 backend/go.sum
   s_8cefdaccf172d2::t_44e61600cde5ac 11-46
+  s_ad33ef1498ecf2::t_f96d2e5ffd6bf4 11-46
 backend/internal/app/startup_test.go
   s_8cefdaccf172d2::t_34988d3e8ae4ae 64,103,108-133
 backend/internal/infra/config/config_test.go
   s_8cefdaccf172d2::t_eb5af9dc077c67 340-364
 backend/internal/infra/media/s3_store_test.go
   s_8cefdaccf172d2::t_ab454407c0456a 1-106
+backend/internal/infra/provider/web/chat.go
+  s_ad33ef1498ecf2::t_b49ae5180d08c9 223
+backend/internal/infra/provider/web/adapter.go
+  s_ad33ef1498ecf2::t_302144bf2b6fb3 6
+backend/internal/infra/egress/manager.go
+  s_ad33ef1498ecf2::t_9f331fa4b886d5 10,634-635,642,699,701-712
+  s_ad33ef1498ecf2::t_f2b6b587179581 713
+backend/internal/infra/provider/web/image.go
+  s_ad33ef1498ecf2::t_0507465406b909 1513,1658-1673,1676,1678-1686,1688-1689,1695-1698,1705-1707,1712-1713,1717-1720,1727
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -45,6 +61,14 @@ backend/internal/infra/media/s3_store_test.go
         "tool": "pi",
         "id": "019f8366-9023-7360-a758-0e50abd66ecf",
         "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_ad33ef1498ecf2": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f6321-0325-7ebf-985c-324d765d99f4",
+        "model": "grok-4.5"
       },
       "human_author": "cat <git@chen.rs>"
     }

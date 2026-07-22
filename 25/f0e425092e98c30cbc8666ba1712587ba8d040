@@ -22,6 +22,11 @@ backend/internal/infra/config/config.go
 backend/internal/application/egress/service.go
   s_8cefdaccf172d2::t_9a0ed3dfcebc3b 9,45-47,56-64,74-75,77-78,184-186,240-244
   s_8cefdaccf172d2::t_b2e2154afa7dbf 245-246
+backend/internal/infra/provider/web/statsig_engine.go
+  s_66f58e62c51c03::t_04fbde9a28dd3f 512,516
+  s_66f58e62c51c03::t_60edb33f03d4ed 316-318
+backend/internal/infra/provider/web/statsig.go
+  s_66f58e62c51c03::t_df90e1233b2694 164-165
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -29,6 +34,14 @@ backend/internal/application/egress/service.go
   "base_commit_sha": "25f0e425092e98c30cbc8666ba1712587ba8d040",
   "prompts": {},
   "sessions": {
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
     "s_8cefdaccf172d2": {
       "agent_id": {
         "tool": "pi",

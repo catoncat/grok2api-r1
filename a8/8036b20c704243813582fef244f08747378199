@@ -1,0 +1,32 @@
+backend/internal/infra/provider/web/quota_test.go
+  s_66f58e62c51c03::t_a7c3ca691210b6 26-28,31-33,36,42-43
+  s_3dfcdfd79358c1::t_4ae789639f3deb 44
+backend/internal/infra/provider/web/chat.go
+  s_66f58e62c51c03::t_e1b4e3bf928592 885,896-897,901,909,931-935
+  s_66f58e62c51c03::t_897b524d15fb53 905
+  s_66f58e62c51c03::t_264e882fd2aa3f 936
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a88036b20c704243813582fef244f08747378199",
+  "prompts": {},
+  "sessions": {
+    "s_3dfcdfd79358c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f66f8-007d-78b0-8457-2093dd1c07dc",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_66f58e62c51c03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f669d-4175-7d43-8d7c-fc26f629cff2",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
