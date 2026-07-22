@@ -2,6 +2,8 @@ backend/NOTICE
   s_8cefdaccf172d2::t_e40a871404db47 1-24
 backend/internal/application/updatecheck/service_test.go
   s_8cefdaccf172d2::t_68d0a2cdc425fa 38-48
+VERSION
+  s_8cefdaccf172d2::t_4235e0a0ab0a80 1
 ---
 {
   "schema_version": "authorship/3.0.0",
