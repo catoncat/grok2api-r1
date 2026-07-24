@@ -9,10 +9,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	clientkeydomain "github.com/chenyme/grok2api/backend/internal/domain/clientkey"
+	settingsdomain "github.com/chenyme/grok2api/backend/internal/domain/settings"
 	"github.com/chenyme/grok2api/backend/internal/pkg/signerurl"
 	"gopkg.in/yaml.v3"
 )
@@ -24,7 +26,7 @@ const (
 	ClearanceModeFlareSolverr     = "flaresolverr"
 	DefaultStatsigSignerURL       = "https://grok.wodf.de/sign"
 	DefaultFlareSolverrURL        = "http://flaresolverr:8191"
-	RecommendedBuildClientVersion = "0.2.106"
+	RecommendedBuildClientVersion = "0.2.110"
 	RecommendedBuildUserAgent     = "grok-shell/" + RecommendedBuildClientVersion + " (linux; x86_64)"
 
 	maxServerBodyBytes    = 256 << 20
@@ -34,9 +36,14 @@ const (
 	maxRoutingCooldown    = 24 * time.Hour
 	minAuditFlushInterval = 10 * time.Millisecond
 	maxAuditFlushInterval = time.Minute
+	minAuditCommitDelay   = time.Millisecond
+	maxAuditCommitDelay   = 50 * time.Millisecond
 	maxAuditBufferSize    = 262144
 	maxAuditBatchSize     = 4096
+	maxDeploymentReplicas = 1024
 )
+
+var buildForbiddenCodePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 // Config 表示后端运行配置。
 type Config struct {
@@ -44,6 +51,7 @@ type Config struct {
 	Frontend          FrontendConfig          `yaml:"frontend"`
 	Database          DatabaseConfig          `yaml:"database"`
 	RuntimeStore      RuntimeStoreConfig      `yaml:"runtimeStore"`
+	Deployment        DeploymentConfig        `yaml:"deployment"`
 	Auth              AuthConfig              `yaml:"auth"`
 	Secrets           Secrets                 `yaml:"secrets"`
 	BootstrapAdmin    BootstrapAdminConfig    `yaml:"bootstrapAdmin"`
@@ -53,6 +61,7 @@ type Config struct {
 	Routing           RoutingConfig           `yaml:"routing"`
 	Audit             AuditConfig             `yaml:"audit"`
 	ClientKeyDefaults ClientKeyDefaultsConfig `yaml:"clientKeyDefaults"`
+	Accounts          AccountsConfig         `yaml:"accounts"`
 }
 
 type ServerConfig struct {
@@ -103,6 +112,13 @@ type RuntimeStoreConfig struct {
 	Redis  RedisRuntimeConfig `yaml:"redis"`
 }
 
+type DeploymentConfig struct {
+	Replicas    int    `yaml:"replicas"`
+	InstanceID  string `yaml:"instanceID"`
+	ClusterID   string `yaml:"clusterID"`
+	SharedMedia bool   `yaml:"sharedMedia"`
+}
+
 type RedisRuntimeConfig struct {
 	Address   string `yaml:"address"`
 	Username  string `yaml:"username"`
@@ -125,12 +141,13 @@ type ProviderConfig struct {
 }
 
 type BuildProviderConfig struct {
-	BaseURL          string `yaml:"baseURL"`
-	FallbackBaseURL  string `yaml:"fallbackBaseURL"`
-	ClientVersion    string `yaml:"clientVersion"`
-	ClientIdentifier string `yaml:"clientIdentifier"`
-	TokenAuth        string `yaml:"tokenAuth"`
-	UserAgent        string `yaml:"userAgent"`
+	BaseURL               string   `yaml:"baseURL"`
+	FallbackBaseURL       string   `yaml:"fallbackBaseURL"`
+	ClientVersion         string   `yaml:"clientVersion"`
+	ClientIdentifier      string   `yaml:"clientIdentifier"`
+	TokenAuth             string   `yaml:"tokenAuth"`
+	UserAgent             string   `yaml:"userAgent"`
+	ResponseHeaderTimeout Duration `yaml:"-"`
 }
 
 // DefaultBuildFallbackBaseURL 是主 Build API 对可回退推理操作 403 时探测的 XAI API 根地址。
@@ -201,20 +218,38 @@ type RoutingConfig struct {
 	CapacityWait              Duration `yaml:"capacityWait"`
 	MaxAttempts               int      `yaml:"maxAttempts"`
 	PreferFreeBuild           bool     `yaml:"preferFreeBuild"`
+	SegmentedSelectorEnabled  bool     `yaml:"segmentedSelectorEnabled"`
+	SegmentedMinCandidates    int      `yaml:"segmentedSelectorMinCandidates"`
+	SegmentedWindowSize       int      `yaml:"segmentedSelectorWindowSize"`
 	ReasoningReplayEnabled    bool     `yaml:"reasoningReplayEnabled"`
 	ReasoningReplayTTL        Duration `yaml:"reasoningReplayTTL"`
 	ReasoningReplayMaxEntries int      `yaml:"reasoningReplayMaxEntries"`
 }
 
 type AuditConfig struct {
-	BufferSize    int      `yaml:"bufferSize"`
-	BatchSize     int      `yaml:"batchSize"`
-	FlushInterval Duration `yaml:"flushInterval"`
+	BufferSize                  int      `yaml:"bufferSize"`
+	BatchSize                   int      `yaml:"batchSize"`
+	FlushInterval               Duration `yaml:"flushInterval"`
+	CommitDelay                 Duration `yaml:"commitDelay"`
+	LedgerMode                  string   `yaml:"ledgerMode"`
+	LedgerFailureThreshold      int      `yaml:"ledgerFailureThreshold"`
+	LedgerUnhealthyGrace        Duration `yaml:"ledgerUnhealthyGrace"`
+	LedgerQueueHighWatermarkPct int      `yaml:"ledgerQueueHighWatermarkPercent"`
 }
 
 type ClientKeyDefaultsConfig struct {
 	RPMLimit      int `yaml:"rpmLimit"`
 	MaxConcurrent int `yaml:"maxConcurrent"`
+}
+
+// AccountsConfig 定义可热加载的账号池维护策略；默认全部关闭。
+type AccountsConfig struct {
+	MarkBuildForbiddenReauth  bool
+	BuildForbiddenReauthCodes []string
+	AutoCleanReauthEnabled    bool
+	AutoCleanReauthInterval   Duration
+	AutoCleanReauthMinAge     Duration
+	AutoCleanIncludeDisabled  bool
 }
 
 type Secrets struct {
@@ -374,6 +409,26 @@ func (c Config) Validate() error {
 	default:
 		return errors.New("runtimeStore.driver 必须是 memory 或 redis")
 	}
+	if c.Deployment.Replicas < 1 || c.Deployment.Replicas > maxDeploymentReplicas {
+		return fmt.Errorf("deployment.replicas 必须在 1 到 %d 之间", maxDeploymentReplicas)
+	}
+	if c.Deployment.Replicas > 1 {
+		if c.Database.Driver != "postgres" {
+			return errors.New("多实例部署必须使用 PostgreSQL")
+		}
+		if c.RuntimeStore.Driver != "redis" {
+			return errors.New("多实例部署必须使用 Redis 运行态存储")
+		}
+		if strings.TrimSpace(c.Deployment.InstanceID) == "" {
+			return errors.New("多实例部署必须配置 deployment.instanceID")
+		}
+		if strings.TrimSpace(c.Deployment.ClusterID) == "" {
+			return errors.New("多实例部署必须配置 deployment.clusterID")
+		}
+		if !c.Deployment.SharedMedia {
+			return errors.New("多实例部署必须确认 deployment.sharedMedia=true 并挂载共享媒体目录")
+		}
+	}
 	if c.Media.Driver != "local" && c.Media.Driver != "s3" {
 		return errors.New("media.driver 当前仅支持 local 或 s3")
 	}
@@ -427,6 +482,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Provider.Build.ClientVersion) == "" || strings.TrimSpace(c.Provider.Build.ClientIdentifier) == "" || strings.TrimSpace(c.Provider.Build.TokenAuth) == "" || strings.TrimSpace(c.Provider.Build.UserAgent) == "" {
 		return errors.New("provider.build 客户端标识不能为空")
+	}
+	if timeout := c.Provider.Build.ResponseHeaderTimeout.Value(); timeout < settingsdomain.MinBuildResponseHeaderTimeout || timeout > settingsdomain.MaxBuildResponseHeaderTimeout {
+		return errors.New("Grok Build 响应头超时必须在 30 秒到 30 分钟之间")
 	}
 	webURL, err := url.ParseRequestURI(strings.TrimSpace(c.Provider.Web.BaseURL))
 	if err != nil || webURL.Scheme != "https" || webURL.Host == "" || webURL.User != nil {
@@ -493,6 +551,11 @@ func (c Config) Validate() error {
 	if c.Routing.StickyTTL.Value() <= 0 || c.Routing.StickyTTL.Value() > maxRoutingTTL || c.Routing.CooldownBase.Value() <= 0 || c.Routing.CooldownMax.Value() < c.Routing.CooldownBase.Value() || c.Routing.CooldownMax.Value() > maxRoutingCooldown || c.Routing.CapacityWait.Value() <= 0 || c.Routing.CapacityWait.Value() > 5*time.Second || c.Routing.MaxAttempts < 1 || c.Routing.MaxAttempts > 10 {
 		return errors.New("routing 配置无效")
 	}
+	if c.Routing.SegmentedMinCandidates < 100 || c.Routing.SegmentedMinCandidates > 1000000 ||
+		c.Routing.SegmentedWindowSize < 8 || c.Routing.SegmentedWindowSize > 256 ||
+		c.Routing.SegmentedWindowSize > c.Routing.SegmentedMinCandidates {
+		return errors.New("routing segmented selector 配置无效")
+	}
 	if c.Routing.ReasoningReplayTTL.Value() <= 0 || c.Routing.ReasoningReplayTTL.Value() > 24*time.Hour {
 		return errors.New("routing.reasoningReplayTTL 必须在 1 纳秒到 24 小时之间")
 	}
@@ -502,8 +565,40 @@ func (c Config) Validate() error {
 	if c.Audit.BufferSize < 1 || c.Audit.BufferSize > maxAuditBufferSize || c.Audit.BatchSize < 1 || c.Audit.BatchSize > maxAuditBatchSize || c.Audit.BatchSize > c.Audit.BufferSize || c.Audit.FlushInterval.Value() < minAuditFlushInterval || c.Audit.FlushInterval.Value() > maxAuditFlushInterval {
 		return errors.New("audit 队列和批量写入配置无效")
 	}
+	if c.Audit.CommitDelay.Value() < minAuditCommitDelay || c.Audit.CommitDelay.Value() > maxAuditCommitDelay {
+		return errors.New("audit.commitDelay 必须在 1ms 到 50ms 之间")
+	}
+	if c.Audit.LedgerMode != "observe" && c.Audit.LedgerMode != "enforce" {
+		return errors.New("audit.ledgerMode 必须是 observe 或 enforce")
+	}
+	if c.Audit.LedgerFailureThreshold < 1 || c.Audit.LedgerFailureThreshold > 100 {
+		return errors.New("audit.ledgerFailureThreshold 必须在 1 到 100 之间")
+	}
+	if c.Audit.LedgerUnhealthyGrace.Value() < time.Second || c.Audit.LedgerUnhealthyGrace.Value() > 10*time.Minute {
+		return errors.New("audit.ledgerUnhealthyGrace 必须在 1 秒到 10 分钟之间")
+	}
+	if c.Audit.LedgerQueueHighWatermarkPct < 50 || c.Audit.LedgerQueueHighWatermarkPct > 100 {
+		return errors.New("audit.ledgerQueueHighWatermarkPercent 必须在 50 到 100 之间")
+	}
 	if c.ClientKeyDefaults.RPMLimit < 1 || c.ClientKeyDefaults.RPMLimit > clientkeydomain.MaxRPMLimit || c.ClientKeyDefaults.MaxConcurrent < 1 || c.ClientKeyDefaults.MaxConcurrent > clientkeydomain.MaxConcurrent {
 		return errors.New("clientKeyDefaults 超出允许范围")
+	}
+	if c.Accounts.AutoCleanReauthInterval.Value() < time.Minute || c.Accounts.AutoCleanReauthInterval.Value() > time.Hour {
+		return errors.New("accounts.autoCleanReauthInterval 必须在 1 分钟到 1 小时之间")
+	}
+	if c.Accounts.AutoCleanReauthMinAge.Value() < time.Minute || c.Accounts.AutoCleanReauthMinAge.Value() > 30*24*time.Hour {
+		return errors.New("accounts.autoCleanReauthMinAge 必须在 1 分钟到 30 天之间")
+	}
+	if len(c.Accounts.BuildForbiddenReauthCodes) > 32 {
+		return errors.New("accounts.buildForbiddenReauthCodes 最多支持 32 个错误码")
+	}
+	for _, code := range c.Accounts.BuildForbiddenReauthCodes {
+		if !buildForbiddenCodePattern.MatchString(strings.TrimSpace(code)) {
+			return errors.New("accounts.buildForbiddenReauthCodes 包含无效错误码")
+		}
+	}
+	if len(c.Accounts.BuildForbiddenReauthCodes) == 0 {
+		return errors.New("accounts.buildForbiddenReauthCodes 至少需要一个错误码")
 	}
 	return nil
 }
@@ -555,6 +650,7 @@ func defaultConfig() Config {
 			Driver: "memory",
 			Redis:  RedisRuntimeConfig{Address: "127.0.0.1:6379", KeyPrefix: "grok2api:"},
 		},
+		Deployment: DeploymentConfig{Replicas: 1, ClusterID: "grok2api"},
 		Auth: AuthConfig{
 			AccessTokenTTL:  Duration(15 * time.Minute),
 			RefreshTokenTTL: Duration(30 * 24 * time.Hour),
@@ -563,7 +659,7 @@ func defaultConfig() Config {
 			Build: BuildProviderConfig{
 				BaseURL: "https://cli-chat-proxy.grok.com/v1", FallbackBaseURL: DefaultBuildFallbackBaseURL,
 				ClientVersion: RecommendedBuildClientVersion, ClientIdentifier: "grok-shell", TokenAuth: "xai-grok-cli",
-				UserAgent: RecommendedBuildUserAgent,
+				UserAgent: RecommendedBuildUserAgent, ResponseHeaderTimeout: Duration(settingsdomain.DefaultBuildResponseHeaderTimeout),
 			},
 			Web: WebProviderConfig{
 				BaseURL: "https://grok.com", StatsigMode: StatsigModeURL, StatsigSignerURL: DefaultStatsigSignerURL,
@@ -593,12 +689,27 @@ func defaultConfig() Config {
 			CapacityWait:              Duration(500 * time.Millisecond),
 			MaxAttempts:               3,
 			PreferFreeBuild:           false,
+			SegmentedSelectorEnabled:  false,
+			SegmentedMinCandidates:    3000,
+			SegmentedWindowSize:       64,
 			ReasoningReplayEnabled:    true,
 			ReasoningReplayTTL:        Duration(time.Hour),
 			ReasoningReplayMaxEntries: 10240,
 		},
-		Audit:             AuditConfig{BufferSize: 16384, BatchSize: 256, FlushInterval: Duration(250 * time.Millisecond)},
+		Audit: AuditConfig{
+			BufferSize: 16384, BatchSize: 256, FlushInterval: Duration(250 * time.Millisecond), CommitDelay: Duration(5 * time.Millisecond),
+			LedgerMode: "enforce", LedgerFailureThreshold: 1,
+			LedgerUnhealthyGrace: Duration(10 * time.Second), LedgerQueueHighWatermarkPct: 90,
+		},
 		ClientKeyDefaults: ClientKeyDefaultsConfig{RPMLimit: clientkeydomain.DefaultRPMLimit, MaxConcurrent: clientkeydomain.DefaultMaxConcurrent},
+		Accounts: AccountsConfig{
+			MarkBuildForbiddenReauth:  false,
+			BuildForbiddenReauthCodes: []string{"permission-denied"},
+			AutoCleanReauthEnabled:    false,
+			AutoCleanReauthInterval:   Duration(10 * time.Minute),
+			AutoCleanReauthMinAge:     Duration(time.Hour),
+			AutoCleanIncludeDisabled:  false,
+		},
 	}
 }
 

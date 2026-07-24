@@ -170,7 +170,11 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	var excludedNodeID uint64
 	egressFailoverUsed := false
 	for attempt := 0; attempt < 3; attempt++ {
-		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(ctx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0, excludedNodeID)
+		attemptCtx := ctx
+		if attempt > 0 {
+			attemptCtx = infraegress.WithPhysicalCallStage(ctx, "anti_bot_retry")
+		}
+		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(attemptCtx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0, excludedNodeID)
 		if openErr != nil {
 			// Grok /index 403 是节点级 anti-bot 信号：只对当前 lease 反馈，
 			// 最多换一次不同 Egress（receipt r1.5/r1.6）。
