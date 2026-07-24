@@ -1,0 +1,19 @@
+VERSION
+  s_e63f619cc849cf::t_8c42a47309213c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "205481937c2df2c6937c491d68688e39c158b679",
+  "prompts": {},
+  "sessions": {
+    "s_e63f619cc849cf": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f920f-f85b-7994-b663-118e413b8e04",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
