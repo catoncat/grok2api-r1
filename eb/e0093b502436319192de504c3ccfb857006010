@@ -1,0 +1,470 @@
+backend/internal/infra/config/config.go
+  s_e63f619cc849cf::t_0a53ff6124b7fa 64
+  s_e63f619cc849cf::t_aa730706c334e0 12,17,29,39-40,43,46-47,54,115-121,144-150,221-223,230-237,245-254,412-431,486-488,554-558,568-582,586-602,653,662,692-694,699-703,705-712
+backend/internal/transport/http/settings/handler.go
+  s_e63f619cc849cf::t_0be7317b517ed0 34
+  s_e63f619cc849cf::t_a2053a34d6e335 59-66,98-110,117,125-133,187,223,229-248,262,295-298,301,306-313,331-351
+backend/internal/application/gateway/service.go
+  s_e63f619cc849cf::t_e974f1129b7411 807,912,952-964,993,1054
+  s_e63f619cc849cf::t_63bbb41cb01915 821
+  s_e63f619cc849cf::t_d101c2733c27a8 143-144
+  s_a98e99836818a0::t_a860d2a30deecd 30,42,47-48,53,108-111,166-170,267-301,382-404,642,656-658,660,673,676-677,744,758-760,789,805-806,849-852,856-858,891,900,910-911,930-932,938-940,943-945,947-951,965-967,969,987-992,994-995,1001-1002,1004,1006-1009,1042-1044,1048-1053,1056,1059-1064,1071-1082,1088,1148-1151,1286-1290,1304,1331,1409,1413-1417,1421-1426
+backend/internal/domain/settings/settings.go
+  s_e63f619cc849cf::t_d226f6558b73c9 23
+  s_e63f619cc849cf::t_11454b84a74d0a 5-10,79-85,90-105,113,121-136
+frontend/src/features/settings/egress-nodes.tsx
+  s_e63f619cc849cf::t_c22c0c85a97f3a 31,35,41-47,64-82,90-98,106,132-151,153-168,170-213,215-224,226-231,233-238
+  s_e63f619cc849cf::t_d9d9b28239b2b0 350
+  s_e63f619cc849cf::t_e681777157730b 239-241
+  s_e63f619cc849cf::t_d9d1da7f6b3cf7 347-349
+  s_e63f619cc849cf::t_71ee06c5da5466 351-353
+  s_e63f619cc849cf::t_d74e41403da017 2,7,10,18,20-23,25,28,242,247-264,272,280-282,336-346,354-383
+backend/internal/infra/persistence/relational/account_repository.go
+  s_e63f619cc849cf::t_4d4161e2815127 21,27,32-33,85,305,309,313,317,323,326,330,335-336,342,345,348,350,352,358,367,371,380,386,395,401,410,416,420,422,744,997,1000,1123-1138,1178,1211,1223,1288,1297,1300,1307,1312,1322,1326,1328,1333,1335,1340,1345,1351,1357-1358,1360,1378,1401,1408,1415,1418,1422,1427,1433,1436,1443,1446,1451,1454,1458,1462,1466,1470,1474,1479,1484,1486,1492,1499,1504,1508,1513,1515,1517,1658-1659,1677-1678,1704,1801,1825,1834,1869,1893,1918,1931,1998,2013,2115,2123,2193
+  s_e63f619cc849cf::t_230dc53a405517 18-20
+  s_e63f619cc849cf::t_bf5c8f5c927da8 25-26
+  s_e63f619cc849cf::t_bfc8abdc3dabdb 28-31
+  s_e63f619cc849cf::t_0e1e7f81c58c31 34
+  s_e63f619cc849cf::t_e339b14af360ec 82-84
+  s_e63f619cc849cf::t_22ab9ebf2ca263 302-304
+  s_e63f619cc849cf::t_c376efcea6f077 306-308
+  s_e63f619cc849cf::t_454a7dfbca300e 310-312
+  s_e63f619cc849cf::t_65f8090db4bcd6 314-316
+  s_e63f619cc849cf::t_d709f8ed4c8d95 318-322
+  s_e63f619cc849cf::t_45ed010057773b 324-325
+  s_e63f619cc849cf::t_6a61e6addd98ae 327-329
+  s_e63f619cc849cf::t_6a97b179644b6a 331-334
+  s_e63f619cc849cf::t_91611fb82387d9 337-341
+  s_e63f619cc849cf::t_2b7b1fafb8931a 343-344
+  s_e63f619cc849cf::t_09d29ea863fb83 346-347
+  s_e63f619cc849cf::t_a891e43a93e655 349
+  s_e63f619cc849cf::t_39ac879199e53c 351
+  s_e63f619cc849cf::t_2c6ec69ea991b7 353-357
+  s_e63f619cc849cf::t_afb5e26a7277ca 359-361,364-366
+  s_e63f619cc849cf::t_7bebf6f7dcf19d 368-370
+  s_e63f619cc849cf::t_907acc828c010f 372-374,377-379
+  s_e63f619cc849cf::t_aef4f75bbba393 381-385
+  s_e63f619cc849cf::t_43f88c7c84c79a 387-389,392-394
+  s_e63f619cc849cf::t_cbba222f7f8382 396-400
+  s_e63f619cc849cf::t_e775a5a55354ce 402-404,407-409
+  s_e63f619cc849cf::t_ac98bc308bb538 411-415
+  s_e63f619cc849cf::t_7260eae62beec5 417-419
+  s_e63f619cc849cf::t_577987f80c49d2 421
+  s_e63f619cc849cf::t_56fc44bf2f0169 423
+  s_e63f619cc849cf::t_dfd353649222db 741-743
+  s_e63f619cc849cf::t_2d91ed486f02d0 745
+  s_e63f619cc849cf::t_db3f42411dc0c4 994-996
+  s_e63f619cc849cf::t_0fece6c61df202 998-999
+  s_e63f619cc849cf::t_31d052702bd826 1175-1177
+  s_e63f619cc849cf::t_3d6467c086f931 1179
+  s_e63f619cc849cf::t_41d4d4c586b655 1209-1210
+  s_e63f619cc849cf::t_eec1db54f2dfa2 1212
+  s_e63f619cc849cf::t_e772c51aa4c125 1220-1222
+  s_e63f619cc849cf::t_e2acad64fe1321 1224
+  s_e63f619cc849cf::t_979b4939af9465 1286-1287
+  s_e63f619cc849cf::t_cffdd1026e5ba1 1294-1296
+  s_e63f619cc849cf::t_51632b75ff606f 1298-1299
+  s_e63f619cc849cf::t_4ae67b0b3f1f8e 1301-1306
+  s_e63f619cc849cf::t_758d9a09c43170 1308-1311
+  s_e63f619cc849cf::t_916318ce0104ed 1313-1315,1319-1321
+  s_e63f619cc849cf::t_360749f137e56e 1323-1325
+  s_e63f619cc849cf::t_48ca349249c701 1327
+  s_e63f619cc849cf::t_5da66b24ee4f3c 1329-1332
+  s_e63f619cc849cf::t_a6c3f7f7fdc979 1334
+  s_e63f619cc849cf::t_eb257c8f199539 1336-1339
+  s_e63f619cc849cf::t_710e9b05159299 1341-1344
+  s_e63f619cc849cf::t_514d56c3de240b 1346-1350
+  s_e63f619cc849cf::t_2e21ed0334f739 1352-1356
+  s_e63f619cc849cf::t_6cb3f8723074eb 1359
+  s_e63f619cc849cf::t_1b4a73d7e6b13a 1361
+  s_e63f619cc849cf::t_a6611d51fb1e07 1376-1377
+  s_e63f619cc849cf::t_9c2abc61b3e312 1379
+  s_e63f619cc849cf::t_3afef991934efe 1399-1400
+  s_e63f619cc849cf::t_85f13ba7921d49 1405-1407
+  s_e63f619cc849cf::t_844b1f1b9cd2b0 1409-1414
+  s_e63f619cc849cf::t_1e74012d8722cc 1416-1417
+  s_e63f619cc849cf::t_8f01c4cf2d99a6 1419-1421
+  s_e63f619cc849cf::t_5d368835433005 1423-1426
+  s_e63f619cc849cf::t_2477ee01426444 1428-1432
+  s_e63f619cc849cf::t_95c8097cbd7ed5 1434-1435
+  s_e63f619cc849cf::t_52a15940932adf 1437-1442
+  s_e63f619cc849cf::t_2e53136d023355 1444-1445
+  s_e63f619cc849cf::t_cc7fe40c59cca2 1447-1450
+  s_e63f619cc849cf::t_8cefdcb551cab9 1452-1453
+  s_e63f619cc849cf::t_3fa0005fdd0528 1455-1457
+  s_e63f619cc849cf::t_4812c75f3de162 1459-1461
+  s_e63f619cc849cf::t_f2eb656b384f25 1463-1465
+  s_e63f619cc849cf::t_4d1301817a5aa2 1467-1469
+  s_e63f619cc849cf::t_f316281a23ed27 1471-1473
+  s_e63f619cc849cf::t_7c2ecbfe0925e5 1475-1478
+  s_e63f619cc849cf::t_e76dd7a7b3877f 1480-1483
+  s_e63f619cc849cf::t_415a6c2a315a6e 1485
+  s_e63f619cc849cf::t_f752ec7044f4f8 1487-1491
+  s_e63f619cc849cf::t_0a75bb92c4cfcf 1493-1498
+  s_e63f619cc849cf::t_7f8d8ad27694b0 1500-1503
+  s_e63f619cc849cf::t_3dc1a3841823dc 1505-1507
+  s_e63f619cc849cf::t_ba99e96a7b8f41 1509-1512
+  s_e63f619cc849cf::t_b846139a677208 1514
+  s_e63f619cc849cf::t_17ab8ff3dd5f24 1516
+  s_e63f619cc849cf::t_7f836ad627cca8 1518
+  s_e63f619cc849cf::t_80945cfda91b0c 1655-1657
+  s_e63f619cc849cf::t_87fa4b69722a71 1660-1662,1674-1676
+  s_e63f619cc849cf::t_20a0665ff00acd 1679
+  s_e63f619cc849cf::t_1f8a16acf2af8f 1701-1703
+  s_e63f619cc849cf::t_4584fd7c258fa8 1705
+  s_e63f619cc849cf::t_b300cd770d1d48 1799-1800
+  s_e63f619cc849cf::t_87f9e5d51ea5c9 1802
+  s_e63f619cc849cf::t_24450bf6d7881b 1823-1824
+  s_e63f619cc849cf::t_7da4f481c4fa2f 1826-1828,1831-1833
+  s_e63f619cc849cf::t_f4ef30bc6687e1 1835
+  s_e63f619cc849cf::t_19aeb6ee0f5532 1866-1868
+  s_e63f619cc849cf::t_1d7cf2d423dad3 1870
+  s_e63f619cc849cf::t_2ff6a3082cfc8b 1891-1892
+  s_e63f619cc849cf::t_04bdaac83ca9ce 1894
+  s_e63f619cc849cf::t_4c0d4645fce606 1916-1917
+  s_e63f619cc849cf::t_7ade8286e76226 1928-1930
+  s_e63f619cc849cf::t_cd74505880d44d 1932
+  s_e63f619cc849cf::t_98368401fa5e0b 1995-1997
+  s_e63f619cc849cf::t_cd5f301cf3c07d 1999
+  s_e63f619cc849cf::t_39fe4569b71385 2010-2012
+  s_e63f619cc849cf::t_43df4e7ae4cab4 2014
+  s_e63f619cc849cf::t_107dbcf9af93bd 2112-2114
+  s_e63f619cc849cf::t_3f4511a48fa0a2 2116
+  s_e63f619cc849cf::t_01353b2de28bca 2120-2122
+  s_e63f619cc849cf::t_08ef6a00abbdb8 2124
+  s_e63f619cc849cf::t_1ddfc880ce941a 2191-2192
+  s_e63f619cc849cf::t_1676b46083977e 2194
+  s_e63f619cc849cf::t_7c24a3af3c1cc1 80-81,93-94,301,362-363,375-376,390-391,405-406,926,1065-1069,1098-1099,1102,1105-1108,1119,1189,1292-1293,1316-1318,1363,1633-1654,1663-1673,1698-1700,1795,1829-1830,1838,1856,1884,2189
+backend/internal/application/settings/service.go
+  s_e63f619cc849cf::t_a11b96013bde38 151-153
+  s_a98e99836818a0::t_596a126234fd63 23-29,95-108,116,125-138,302-305,355-362,366-370,373-376,379-381,386-398,410,443-446,449,454-461,484-486,525-529,532-534,537-546,569-571,598,631-635,638,641-667,669
+backend/internal/app/startup.go
+  s_e63f619cc849cf::t_50db975674a534 133
+  s_e63f619cc849cf::t_7de368165324d8 10,125,131-132,134-136,142,152-165,242
+backend/internal/app/application.go
+  s_e63f619cc849cf::t_c822cd20360a37 52
+  s_e63f619cc849cf::t_7da952c31d0d6a 333,335-336,339-342,346-349,352-353,384,386,396,399-401,408,414-416
+  s_e63f619cc849cf::t_6d5df3a56e3672 217
+  s_e63f619cc849cf::t_8330a3852a94cc 53-55
+  s_e63f619cc849cf::t_56e6d13055f9fa 332
+  s_e63f619cc849cf::t_ba386d1c6d9921 10,22,42,56-58,68,71,80,87,162-165,174-176,192,202-203,212,226,231,290-291,420-426,458-466,504-507,514-520,544-545,595-601,630-718
+backend/internal/infra/persistence/relational/models.go
+  s_e63f619cc849cf::t_b68996f76e4e28 38
+  s_e63f619cc849cf::t_9241aaf11d4b10 53-63,461-478,480-490,497-505,509-527
+backend/internal/application/account/service.go
+  s_e63f619cc849cf::t_048ffcd20a8c5f 307
+  s_e63f619cc849cf::t_fb68fe6e368903 306
+  s_e63f619cc849cf::t_cd2682fe02fba3 18,42-67,74-90,99-104,232,235-239,314-315,318,322,336-367,374,417-428,436-439,699-760,764,2314-2315,2318,2330,2333,2338-2345,2347-2357,2359-2361,2363,2367-2374,2379,2382,2391-2399,2405-2408,2410,2424-2427,2439-2441,2445-2486,2496-2508,2510-2515,2519-2521,2524-2535,2538-2541,2544-2562,2564-2627,2630-2644
+backend/internal/app/startup_test.go
+  s_e63f619cc849cf::t_fde5476f01e3c6 143
+  s_a98e99836818a0::t_5c6f2c2c9da8d0 91,130
+backend/internal/application/gateway/failure_test.go
+  s_e63f619cc849cf::t_c6d466e2bd5b88 55-57,70-73,97
+  s_e63f619cc849cf::t_a45a6e004dc7b7 54
+  s_e63f619cc849cf::t_377797832ea3d0 4,10,14-40,51,107-116,123,127,131,135-189
+backend/internal/application/settings/service_test.go
+  s_e63f619cc849cf::t_7718ac91b88e41 96
+  s_e63f619cc849cf::t_4261a5061e427d 6,8,50,53,68,74-76,101-163,440-626
+.gitignore
+  s_e63f619cc849cf::t_7aba643a668184 18
+README.md
+  s_e63f619cc849cf::t_47a39f5cfc4d27 34-37,49,51,63,66-128,131,133,135,137-144,146,148-152,154,156,158,166,191,200,208,210-215,217,219,221-225,227,229,231,233-234,236-242,244,246,248,252,258,260-269,271-273,275,277,280,286,288,290-294,333,335,337-352,354,356,358-361,363-372,389,395
+README.zh-CN.md
+  s_e63f619cc849cf::t_2e6990c36a2a12 35-38,50,52,67-129,132,134,136,138-153,155,159,167,176-177,192,201,209,211-215,218,220,222-226,228,230,232,234-243,245,247,249,253,259,261,263-270,272-274,276,278,281-282,287,289,291-295,334,336,338-353,355,357,359-362,364-373,390,396
+VERSION
+  s_e63f619cc849cf::t_3bb47e0d739281 1
+backend/internal/app/topology.go
+  s_e63f619cc849cf::t_d32bca1c21ccb3 1-72
+backend/internal/app/topology_test.go
+  s_e63f619cc849cf::t_cfa0870ba646fe 1-32
+backend/internal/application/account/list_filter_test.go
+  s_e63f619cc849cf::t_3e0a45768bce06 1-30
+backend/internal/application/account/quota_refresh_redis_integration_test.go
+  s_e63f619cc849cf::t_6ab7ca4fd5cb13 1-147
+backend/internal/application/account/quota_refresh_test.go
+  s_e63f619cc849cf::t_46582527a11efa 7,15-16,30-31,33-34,41-217,277-500,583-584,608-613
+backend/internal/application/audit/service.go
+  s_e63f619cc849cf::t_b664505255f15b 18,24-29,32-58,69-75,78-82,85-115,119-127,132-217,219-226,229,239,246-262,264-269,272-275,277-285,289-293,295-296,298-299,303-328,331-341,344-351,354-373,378-380,382,385,672-697,699,702-715,719-722,725,728,730-735,740-743,755-797,804-807,809,819-825,827-960
+backend/internal/application/audit/service_benchmark_test.go
+  s_e63f619cc849cf::t_a54fdc912cc830 1-74
+backend/internal/application/audit/service_test.go
+  s_e63f619cc849cf::t_96d6229b92f7fe 6,9,52,63,139-140,142-143,154-446,449-507,514-580
+backend/internal/application/clientkey/service.go
+  s_e63f619cc849cf::t_a94269c5c5fc4d 9,15,69-78,84,88,355,359,362-367,378,381-382,386-411,418-430
+backend/internal/application/clientkey/service_test.go
+  s_e63f619cc849cf::t_d69df6c06932f6 178-207
+backend/internal/application/egress/assignment.go
+  s_e63f619cc849cf::t_122c97bdf713b6 1-345
+backend/internal/application/egress/operations.go
+  s_e63f619cc849cf::t_f1fd8c1d64b4dd 1-512
+backend/internal/application/egress/service.go
+  s_e63f619cc849cf::t_86d79390649828 10,12,37,46-79,87-95,103-105,158,163-170,178-197,205,210-242,258-377,401-406,461-465,497-498,501-503
+backend/internal/application/egress/subscription.go
+  s_e63f619cc849cf::t_d651cc0854f08d 1-249
+backend/internal/application/egress/subscription_test.go
+  s_e63f619cc849cf::t_c50d0bf9590fa9 1-59
+backend/internal/application/egress/sync.go
+  s_e63f619cc849cf::t_53da73a2fe2737 1-74
+backend/internal/application/gateway/attempt.go
+  s_e63f619cc849cf::t_dbcfda5be58c8a 22,351-352
+backend/internal/application/gateway/finalization.go
+  s_e63f619cc849cf::t_e00bda6bf0cc15 1-49
+backend/internal/application/gateway/image.go
+  s_e63f619cc849cf::t_a484b077f2fe8e 125-127,195,270-271,273,279,296,299-304,313-317
+backend/internal/application/gateway/selector.go
+  s_e63f619cc849cf::t_8e097de87fa1e7 20-26,41-53,56,60-69,76-102,141-147,153-164,167-193,205,209,216,221,223-232,236-237,241-246,406-411,582,589,601,603-610,623,627,670-704,706-707,709-714,725-726,731-755,758-759,761-767,793-799,801,803,806,810,812,815,820-822,831-1015,1017,1021-1087,1102,1104
+backend/internal/application/gateway/selector_layered_benchmark_test.go
+  s_e63f619cc849cf::t_7322a9762c10bf 1-68
+backend/internal/application/gateway/selector_layered_test.go
+  s_e63f619cc849cf::t_7512d1f76aa649 1-245
+backend/internal/application/gateway/selector_plan.go
+  s_e63f619cc849cf::t_fe21ebd724fb7f 101-104,110-155,158,168,177
+backend/internal/application/gateway/selector_segmented.go
+  s_e63f619cc849cf::t_fc29576b808f52 1-111
+backend/internal/application/gateway/selector_segmented_active.go
+  s_e63f619cc849cf::t_be83efcae019f6 1-223
+backend/internal/application/gateway/selector_segmented_active_test.go
+  s_e63f619cc849cf::t_73f27163c98725 1-541
+backend/internal/application/gateway/selector_test.go
+  s_e63f619cc849cf::t_2fdff83b6bdb27 148-225,605-606,608
+backend/internal/application/gateway/service_test.go
+  s_e63f619cc849cf::t_8063de1ca9d486 118-122,166,170,688-807,1051,1054-1082,1546-1548,1653-1657,1667-1676,1926,1930-1938,1940
+backend/internal/application/gateway/timing.go
+  s_e63f619cc849cf::t_ee0c462b9a38d0 10,81-86,93-97
+backend/internal/application/gateway/video.go
+  s_e63f619cc849cf::t_4ea3a2c640cb28 65-67
+backend/internal/application/invalidation/service.go
+  s_e63f619cc849cf::t_85fb337c7d3f34 1-124
+backend/internal/application/invalidation/service_test.go
+  s_e63f619cc849cf::t_a479d3822d2fc5 1-99
+backend/internal/application/updatecheck/service.go
+  s_e63f619cc849cf::t_313c497d4e6ba5 207-223,233-248
+backend/internal/application/updatecheck/service_test.go
+  s_e63f619cc849cf::t_bbd7c42a7d4f23 79-100
+backend/internal/domain/egress/egress.go
+  s_e63f619cc849cf::t_757fe59599a194 28-30,41-46,52-215
+backend/internal/infra/egress/buildclient.go
+  s_e63f619cc849cf::t_70e453ebb862da 19,30
+backend/internal/infra/egress/buildclient_test.go
+  s_e63f619cc849cf::t_91549533235960 13-14,17-66,83,102,130
+backend/internal/infra/egress/manager.go
+  s_e63f619cc849cf::t_f07db700e73c66 8,11,14,19,25,27,33,35,39,46-49,51-52,80-84,97-100,102,104-105,107-113,122-123,144-150,168-172,174,176-179,183-204,211,213,220,226-228,230,234,250,252,262-265,269-273,275,278-367,370-408,416-417,424-425,432-434,437-442,445-446,450-451,453-463,469-629,689,692-718,764-770,773-797,799-802,805,810-840,848-850,856-878,880-882,905,907-908,910,916-918,920,925,928-932,940-981,985-986,989-1011,1015-1016,1020,1022-1023,1027-1054,1059,1062,1065,1068,1071-1072,1085,1087,1090,1092,1095-1100,1103-1109,1111-1114,1116-1125,1129-1134,1137,1144-1148,1152-1155,1160-1165,1169,1171,1187,1200,1208-1211,1223-1225,1229-1230,1255-1289,1291-1292,1297,1335,1346,1349,1365,1370,1482,1492,1613,1625-1629,1637-1639,1652-1657,1659-1664,1668,1674,1681,1685,1717,1720,1747,1763-1765,1771,1773,1776-1777,1781,1787,1789
+backend/internal/infra/egress/manager_test.go
+  s_e63f619cc849cf::t_54a5eb6964a1f3 10,23-39,42-44,46,49-50,52-59,61-75,97,113,119-288,395-476,622-709,887-1058,1511-1518,1520-1521,1523-1766,1770,1772-1773,1778-1798,1814-1816,1830-1840,1850-1852,1863,1867-1870,1876-1882,1887,1900-1908,1917-1977,2008-2009,2024,2029,2033-2036,2038-2039,2041-2043,2047-2049,2051-2052,2054-2055,2059,2064-2068,2070-2073,2075,2079-2081,2083-2088,2137-2140,2142-2146,2148-2151,2153-2154,2156-2158,2162,2167,2169-2173
+backend/internal/infra/egress/physical_calls.go
+  s_e63f619cc849cf::t_009f8a3c083d7c 1-175
+backend/internal/infra/egress/physical_calls_test.go
+  s_e63f619cc849cf::t_d46a34e8d58afd 1-103
+backend/internal/infra/egress/trace.go
+  s_e63f619cc849cf::t_2c696867a82962 31,51,53,56-76
+backend/internal/infra/persistence/relational/account_links.go
+  s_e63f619cc849cf::t_c69953730f6896 72,81,115-118
+backend/internal/infra/persistence/relational/audit_repository.go
+  s_e63f619cc849cf::t_270996505bf9a7 10,13,25-37,39,43-44,54-63,65-197,199-221,223-224,226-236,239-240,242-286,289,291-313,315-326,421-433,453-458,460-464,467,469,472,478-488,492-494,498-504
+backend/internal/infra/persistence/relational/audit_repository_test.go
+  s_e63f619cc849cf::t_cecc1b5a9cf951 6,93-123,207-353
+backend/internal/infra/persistence/relational/client_key_repository.go
+  s_e63f619cc849cf::t_d2fdc6832b0461 6,187,191-195,200-205,208-210,212-214,217-229,232,249-270,302,306-321,324-340,343,345-351,354-371,374
+backend/internal/infra/persistence/relational/client_key_repository_test.go
+  s_e63f619cc849cf::t_c2cb6c0ab5e643 6,8-9,13,58-345
+backend/internal/infra/persistence/relational/database.go
+  s_e63f619cc849cf::t_2bf913a3d2ca90 5,23-40
+backend/internal/infra/persistence/relational/egress_operations_test.go
+  s_e63f619cc849cf::t_042d71c2775c0b 1-804
+backend/internal/infra/persistence/relational/egress_repository.go
+  s_e63f619cc849cf::t_151d1f004f2a55 5,10-11,35-38,40-42,52-53,65-78,133-140,150-466,470,475,485-488,491,496,500-547
+backend/internal/infra/persistence/relational/invalidation_test.go
+  s_e63f619cc849cf::t_243c95b8982f8b 1-169
+backend/internal/infra/persistence/relational/list_filter_repository_test.go
+  s_e63f619cc849cf::t_2c1e59bb3fc035 9,62-70,87,96,99-166,168
+backend/internal/infra/persistence/relational/mapping.go
+  s_e63f619cc849cf::t_d8c05cd3f858ba 83,106,111-125
+backend/internal/infra/persistence/relational/model_capability_repository_test.go
+  s_e63f619cc849cf::t_425125d5680578 243-278
+backend/internal/infra/persistence/relational/model_repository.go
+  s_e63f619cc849cf::t_c3f49964a13073 18-21,56-65,168-169,171-186,188-189,192,195,220,232-235,277-278,312-314,318-321,348-353,383,387-392,396,493-496,538-541,546-547,553-559,592-595,619-622,630,638-641,643-651,673-692
+backend/internal/infra/persistence/relational/postgres_integration_test.go
+  s_e63f619cc849cf::t_91da394f9d3a20 7-11,15-16,20,22-24,26-28,31-141,243-729
+backend/internal/infra/persistence/relational/repository_test.go
+  s_e63f619cc849cf::t_f82baecd3106dc 519-521,529-531,538-561
+backend/internal/infra/persistence/relational/response_repository.go
+  s_e63f619cc849cf::t_bc162f3b5a6f9f 51-72,75-97
+backend/internal/infra/persistence/relational/response_repository_test.go
+  s_e63f619cc849cf::t_612525d4eaad32 51-107
+backend/internal/infra/persistence/relational/schema.go
+  s_e63f619cc849cf::t_5b6390f1f178e7 6,12-13,18-19,23-25,75,82,85,101-113,135-137,170-175,187-241
+backend/internal/infra/persistence/relational/schema_console_upgrade_test.go
+  s_e63f619cc849cf::t_931a51e5654d83 72-105
+backend/internal/infra/persistence/relational/schema_runtime_settings_upgrade_test.go
+  s_e63f619cc849cf::t_986d414a73d0ed 1-88
+backend/internal/infra/persistence/relational/selector_segmented_integration_test.go
+  s_e63f619cc849cf::t_122e64b671e506 1-180
+backend/internal/infra/provider/cli/adapter.go
+  s_e63f619cc849cf::t_503a9ffb5524a9 19,25,34-40,43-46,55,67-68,113,115,118-159,201-207,261,271-278,280,282-298,375,380,383,437-441,535-536,658-659,681-682,710-711,716-717
+backend/internal/infra/provider/cli/adapter_test.go
+  s_e63f619cc849cf::t_64ac9affb38f65 32-44,798
+backend/internal/infra/provider/cli/egress.go
+  s_e63f619cc849cf::t_9cc308985fed22 27-29
+backend/internal/infra/provider/cli/fallback.go
+  s_e63f619cc849cf::t_6839f38ca16f23 6,15,168-198
+backend/internal/infra/provider/cli/fallback_test.go
+  s_e63f619cc849cf::t_8be57eca5e9247 101-129
+backend/internal/infra/provider/cli/import.go
+  s_e63f619cc849cf::t_e66e0368605fe7 4-5,8,38,65-67,85-200,219
+backend/internal/infra/provider/cli/normalize.go
+  s_e63f619cc849cf::t_126ae61dfe6cf5 7,17,54-93
+backend/internal/infra/provider/cli/normalize_test.go
+  s_e63f619cc849cf::t_f016f83304af5f 7,41-71,150-182
+backend/internal/infra/provider/cli/responses_advanced_test.go
+  s_e63f619cc849cf::t_78eb082dac71f3 316,352-390
+backend/internal/infra/provider/cli/responses_codex_tools.go
+  s_e63f619cc849cf::t_c32ee52e383d15 22,371
+backend/internal/infra/provider/cli/responses_compaction.go
+  s_e63f619cc849cf::t_bd2741a699efe7 23,128
+backend/internal/infra/provider/cli/responses_compaction_forward.go
+  s_e63f619cc849cf::t_1491d9e89d401e 18,72-77,86,94-109,111,180-181
+backend/internal/infra/provider/cli/responses_compaction_test.go
+  s_e63f619cc849cf::t_6b1abc6f1933b6 395-396
+backend/internal/infra/provider/cli/responses_history.go
+  s_e63f619cc849cf::t_8d47aab04c9e73 56-57,289-290
+backend/internal/infra/provider/cli/responses_input.go
+  s_e63f619cc849cf::t_c55a7b141c5321 138,159
+backend/internal/infra/provider/cli/responses_reasoning_recovery.go
+  s_e63f619cc849cf::t_b526fe921b1917 10,158,162,164
+backend/internal/infra/provider/cli/responses_reasoning_recovery_test.go
+  s_e63f619cc849cf::t_5f01f49cf897f4 451-452
+backend/internal/infra/provider/cli/responses_tool_declarations.go
+  s_e63f619cc849cf::t_3c34439517371a 248-250
+backend/internal/infra/provider/cli/responses_tool_types.go
+  s_e63f619cc849cf::t_a6b9aa7eeabd1b 6,25-26,37,48-88,96-97,251
+backend/internal/infra/provider/cli/video.go
+  s_e63f619cc849cf::t_95c68fb37e3bb5 39-40
+backend/internal/infra/provider/console/console_test.go
+  s_e63f619cc849cf::t_cafb918604041f 346-357
+backend/internal/infra/provider/console/import.go
+  s_e63f619cc849cf::t_b9b16ebc858837 4,35,43-44,47,50-52
+backend/internal/infra/provider/conversation/conversation_test.go
+  s_e63f619cc849cf::t_046bfcd86769d9 406-430,559-571,924
+backend/internal/infra/provider/conversation/messages_request.go
+  s_e63f619cc849cf::t_da12babddb13d9 92,708
+backend/internal/infra/provider/conversation/messages_response.go
+  s_e63f619cc849cf::t_0ab46649b6151c 108-109,111-112
+backend/internal/infra/provider/import_json.go
+  s_e63f619cc849cf::t_66257f43834905 1-103
+backend/internal/infra/provider/import_json_test.go
+  s_e63f619cc849cf::t_562d6d1c6e90be 1-55
+backend/internal/infra/provider/provider.go
+  s_e63f619cc849cf::t_1d4f84b07c8c01 146-148
+backend/internal/infra/provider/web/chat.go
+  s_e63f619cc849cf::t_33d7ecee16ab9a 173-177
+backend/internal/infra/provider/web/import.go
+  s_e63f619cc849cf::t_1c4afe06149e2f 4,40,48-49,127
+backend/internal/infra/provider/web/import_test.go
+  s_e63f619cc849cf::t_f1757de1f4325d 57-77
+backend/internal/infra/provider/web/statsig.go
+  s_e63f619cc849cf::t_6c36af43bb4f00 443
+backend/internal/infra/runtime/memory/quota_refresh.go
+  s_e63f619cc849cf::t_35be06126bcf2d 1-180
+backend/internal/infra/runtime/memory/quota_refresh_test.go
+  s_e63f619cc849cf::t_6083fb18582d72 1-101
+backend/internal/infra/runtime/redis/store.go
+  s_e63f619cc849cf::t_27e29ce8b44dae 26-27,159-255,306-339,345-389,463,468,550-622
+backend/internal/infra/runtime/redis/store_integration_test.go
+  s_e63f619cc849cf::t_860ba123ec99ba 6,12-13,21-28,30-33,38-44,62-76,98-111,196-244,279-361
+backend/internal/pkg/neterror/classify.go
+  s_e63f619cc849cf::t_1194dd468b385d 1-22
+backend/internal/pkg/neterror/classify_test.go
+  s_e63f619cc849cf::t_0be9bd744bd260 1-30
+backend/internal/pkg/perfmetrics/registry.go
+  s_e63f619cc849cf::t_c66843e1939755 1-205
+backend/internal/pkg/perfmetrics/registry_test.go
+  s_e63f619cc849cf::t_dcdb8f08885ba0 1-54
+backend/internal/repository/account.go
+  s_e63f619cc849cf::t_a41767fe3239da 34-44
+backend/internal/repository/errors.go
+  s_e63f619cc849cf::t_526d70aa6d21b2 3-6,12,14-41
+backend/internal/repository/list.go
+  s_e63f619cc849cf::t_44fde8007f04e1 74,76-79
+backend/internal/repository/response.go
+  s_e63f619cc849cf::t_006ac102be8291 10-15,21
+backend/internal/transport/http/account/handler.go
+  s_e63f619cc849cf::t_68a8895f4d4bb6 282-283,371-375,862,864,866,1173-1174
+backend/internal/transport/http/egress/handler.go
+  s_e63f619cc849cf::t_8f1ad2c9d2329f 5,12,26-30,34-42,62,71-166,172-173,237-240,244-283,296-581,588-593
+backend/internal/transport/http/egress/handler_test.go
+  s_e63f619cc849cf::t_5e5b6fa5857c84 1-37
+backend/internal/transport/http/inference/codex_models.go
+  s_e63f619cc849cf::t_a1ef7542276cab 1-231
+backend/internal/transport/http/inference/handler.go
+  s_e63f619cc849cf::t_686d7cc0d9ef1a 9,21,170-175,184-187,201,949,969-973,1010,1041,1088-1090,1096-1122,1310,1456,1502-1504,1521-1522,1524-1526,1550-1552,1563,1565-1567,1571-1573,1596-1601
+backend/internal/transport/http/inference/handler_test.go
+  s_e63f619cc849cf::t_9d44cf7b98c441 8,155-194,223-235,567,571-573,594,599,604-638,805,816,829
+backend/internal/transport/http/inference/model_list_test.go
+  s_e63f619cc849cf::t_81f1da6f5da0c4 4-6,12,26-153
+backend/internal/transport/http/middleware/body_memory.go
+  s_e63f619cc849cf::t_f40d81383ee8ae 1-102
+backend/internal/transport/http/middleware/request_test.go
+  s_e63f619cc849cf::t_2ad95be73be7bb 9,11,50-213
+backend/internal/transport/http/server.go
+  s_e63f619cc849cf::t_14bbde1e76915b 161
+backend/internal/transport/http/settings/security_test.go
+  s_e63f619cc849cf::t_82443dbe8783f0 50,52,79-150
+config.example.yaml
+  s_e63f619cc849cf::t_045a1c685077e5 69-78,91-107
+frontend/src/features/accounts/accounts-api.ts
+  s_e63f619cc849cf::t_47fbcd1fe28081 92-93,193,225,228-229,240,243-244
+frontend/src/features/accounts/accounts-page.tsx
+  s_e63f619cc849cf::t_4659bc606f0e45 3,19,85,123,126-127,131-132,194-202,209-213,495-519,588-589,736,746-747,813,851-854,863-878,886-887,1222-1257,1320-1325
+frontend/src/features/audits/request-audit-detail-dialog.tsx
+  s_e63f619cc849cf::t_d59c76f7cd05cb 3,15-16,22,24,112,115,118,125-130,198,200-201,221,223
+frontend/src/features/audits/request-audits-api.ts
+  s_e63f619cc849cf::t_6c2d461ed19028 164,177,180,189,192-193
+frontend/src/features/audits/request-audits-page.tsx
+  s_e63f619cc849cf::t_9dda5b1c503fce 3,28-32,51-68,70-74,78,80,88,94-96,111,113,122-123,157,160-161,166,170-171,176,180-185,192,218,228-249
+frontend/src/features/settings/egress-operations.tsx
+  s_e63f619cc849cf::t_4d54b444cc13eb 1-407
+frontend/src/features/settings/settings-api.ts
+  s_e63f619cc849cf::t_ec7b26d8c9dc0f 2,7,22-26,28-35,39-44,48-49,53-54,56-72,84,95-99,101-117,119-148,156,158-162,165-169,175-193,225-228,230-282
+frontend/src/features/settings/settings-model.ts
+  s_e63f619cc849cf::t_8f317ef705a47b 24-40,66,128-135,138-156,164,187,189,191-198,205,227,229,231-238
+frontend/src/features/settings/settings-page.tsx
+  s_a98e99836818a0::t_ac9b6a03ecc913 14,26-29,55,78,84,110,204,234-236,245,257-368
+frontend/src/shared/components/pagination.tsx
+  s_e63f619cc849cf::t_2c08c7ebf48684 28,34-35,37,39,44,49
+frontend/src/shared/i18n/index.ts
+  s_e63f619cc849cf::t_62f2eaa77b6940 491-514,780,782,784-801,804-813,1193,1290,1292-1294,1501-1592
+frontend/src/shared/lib/format.ts
+  s_e63f619cc849cf::t_3107090f650074 1-3,12-20,24-30
+backend/internal/application/gateway/failure.go
+  s_e63f619cc849cf::t_76d9d8f3f7448b 12-13,25,106,112-114,118,125,147-150,154,193,208-211
+backend/internal/domain/account/account.go
+  s_e63f619cc849cf::t_444da084a5a806 113-125,148-160,164-168,355-377
+backend/internal/infra/config/config_test.go
+  s_e63f619cc849cf::t_a36f2cde194078 54-65,69-77,92-101,104,110,171-185,224-226,335-344
+backend/internal/repository/runtime.go
+  s_e63f619cc849cf::t_6a2b27e05c2d28 44-56,76-141,150-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "ebe0093b502436319192de504c3ccfb857006010",
+  "prompts": {},
+  "sessions": {
+    "s_a98e99836818a0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9292-acfd-7bd2-95ac-9e62f67d9aad",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e63f619cc849cf": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f920f-f85b-7994-b663-118e413b8e04",
+        "model": "k3"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
