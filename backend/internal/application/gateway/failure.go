@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	neterrorpkg "github.com/chenyme/grok2api/backend/internal/pkg/neterror"
 )
 
@@ -206,7 +207,7 @@ func isModelPermissionDenial(upstreamCode, text string) bool {
 }
 
 func isDefinitiveAccountBlock(text string) bool {
-	return containsAny(text, "blocked-user", "user is blocked")
+	return provider.IsDefinitiveAccountBlockText(text)
 }
 
 func isPaidQuotaExhaustion(text string) bool {

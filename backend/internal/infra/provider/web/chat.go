@@ -220,10 +220,35 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 				}, nil
 			}
 			if upstream.StatusCode == http.StatusForbidden {
+				// Preserve definitive account-block signals before a Statsig retry can discard the first response.
+				body, readErr := io.ReadAll(io.LimitReader(upstream.Body, 4<<20))
+				_ = upstream.Body.Close()
+				if readErr != nil {
+					lease.Release()
+					return nil, readErr
+				}
+				if provider.IsDefinitiveAccountBlockBody(body) {
+					return &provider.Response{
+						StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header),
+						UpstreamURL: responseUpstreamURL(upstream),
+						Body: &releaseBody{ReadCloser: io.NopCloser(bytes.NewReader(body)), release: func() {
+							lease.Release()
+						}},
+					}, nil
+				}
+				lease.InvalidateClearance()
 				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
-					a.releaseStatsigRetry(upstream, lease)
+					lease.Release()
 					continue
 				}
+				return &provider.Response{
+					StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header),
+					UpstreamURL: responseUpstreamURL(upstream),
+					Body: &releaseBody{ReadCloser: io.NopCloser(bytes.NewReader(body)), release: func() {
+						a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
+						lease.Release()
+					}},
+				}, nil
 			}
 			return &provider.Response{
 				StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header),

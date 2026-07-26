@@ -74,7 +74,8 @@ func TestBuildNodeAlwaysUsesProviderUserAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "web-agent", "console-agent")
+	service := NewService(nil, cipher, "web-agent")
+	service.UpdateDefaults("web-agent", "console-agent")
 	value, err := service.applyInput(domain.Node{UserAgent: "legacy-build-agent"}, Input{
 		Name: "build", Scope: domain.ScopeBuild, Enabled: true, UserAgent: "custom-build-agent",
 	}, false)
@@ -94,7 +95,8 @@ func TestConsoleNodeUsesConsoleDefaultUserAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "web-agent", "console-agent")
+	service := NewService(nil, cipher, "web-agent")
+	service.UpdateDefaults("web-agent", "console-agent")
 	value, err := service.applyInput(domain.Node{}, Input{Name: "console", Scope: domain.ScopeConsole, Enabled: true}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +119,7 @@ func TestPublicNodeReportsAccountBoundProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent", "console-agent")
+	service := NewService(nil, cipher, "browser-agent")
 	cooldown := time.Now().UTC().Add(time.Minute)
 	public := service.publicNode(domain.Node{
 		Scope: domain.ScopeWeb, EncryptedProxyURL: encryptedProxy, Health: 0.2,
@@ -142,7 +144,7 @@ func TestApplyInputResetsHealthOnlyWhenEgressConfigurationChanges(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent", "console-agent")
+	service := NewService(nil, cipher, "browser-agent")
 	cooldown := time.Now().UTC().Add(time.Minute)
 	base := domain.Node{
 		Name: "node", Scope: domain.ScopeWeb, Enabled: true, Health: 0.2,
@@ -186,7 +188,7 @@ func TestProxyPoolRequiresConfiguredProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(nil, cipher, "browser-agent", "console-agent")
+	service := NewService(nil, cipher, "browser-agent")
 	proxyPool := true
 	_, err = service.applyInput(domain.Node{}, Input{
 		Name: "pool", Scope: domain.ScopeBuild, Enabled: true, ProxyPool: &proxyPool,

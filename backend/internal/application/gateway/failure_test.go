@@ -72,6 +72,14 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 			accountScoped: true, permanentAccountDenial: true, modelPermissionDenied: true, upstreamCode: "permission-denied",
 		},
 		{
+			// Web chat nested error; numeric code alone must not decide AccountBlocked.
+			name: "web nested blocked-user message", body: `{"error":{"code":7,"message":"User is blocked [WKE=unauthorized:blocked-user]","details":[]}}`,
+			accountScoped: true, accountBlocked: true, upstreamCode: "", // numeric JSON code is not stringified by extractors
+		},
+		{
+			name: "forbidden without block text", body: `{"error":{"code":7,"message":"Something went wrong","details":[]}}`,
+		},
+		{
 			name: "spending limit", body: `{"code":"personal-team-blocked:spending-limit","error":"quota exhausted"}`,
 			accountScoped: true, quotaExhausted: true, upstreamCode: "personal-team-blocked:spending-limit",
 		},

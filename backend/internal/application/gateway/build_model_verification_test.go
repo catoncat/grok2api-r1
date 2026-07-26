@@ -189,7 +189,7 @@ func TestVerifyBuildModelClassifiesFailuresWithoutChangingBindings(t *testing.T)
 			if err != nil || len(updated.BoundAccountIDs) != 2 || updated.BoundAccountIDs[0] != fixture.keeper.ID || updated.BoundAccountIDs[1] != fixture.target.ID {
 				t.Fatalf("bindings = %#v, err = %v", updated.BoundAccountIDs, err)
 			}
-			candidates, err := fixture.accounts.ListRoutingCandidates(fixture.ctx, accountdomain.ProviderBuild, "grok-4.5", "")
+			candidates, err := fixture.accounts.ListRoutingCandidates(fixture.ctx, accountdomain.ProviderBuild, fixture.route.ID, "grok-4.5", "")
 			if err != nil {
 				t.Fatal(err)
 			}
