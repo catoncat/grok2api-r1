@@ -27,12 +27,14 @@ var catalog = []ModelSpec{
 	// xAI documents grok-4.20-0309 as an alias of the dated reasoning model.
 	// Keep the accepted request ID, but share its quota and rate-limit state.
 	{PublicID: "grok-4.20-0309", UpstreamModel: "grok-4.20-0309", QuotaModel: "grok-4.20-0309-reasoning", MaxOutputTokens: 1_000_000, SearchTools: true},
-	{PublicID: "grok-4.20-0309-reasoning", UpstreamModel: "grok-4.20-0309-reasoning", MaxOutputTokens: 1_000_000, SearchTools: true},
+	{PublicID: "grok-4.20-0309-reasoning", UpstreamModel: "grok-4.20-0309-reasoning", SupportsReasoning: true, MaxOutputTokens: 1_000_000, SearchTools: true},
 	{PublicID: "grok-4.20-0309-non-reasoning", UpstreamModel: "grok-4.20-0309-non-reasoning", MaxOutputTokens: 1_000_000, SearchTools: true},
 	{PublicID: "grok-4.20-multi-agent-0309", UpstreamModel: "grok-4.20-multi-agent-0309", SupportsReasoning: true, DefaultReasoningEffort: "medium", MaxOutputTokens: 2_000_000, SearchTools: true},
 	{PublicID: "grok-build-0.1", UpstreamModel: "grok-build-0.1", MaxOutputTokens: 256_000, SearchTools: true},
 }
 
+// Effort-suffixed aliases only include levels each model actually supports
+// (see domain/model.SupportedReasoningEfforts). No blanket none/low/medium/high/xhigh/max template.
 var aliases = []provider.ModelAlias{
 	consoleAlias("grok-4.3-console", "grok-4.3", "grok-4.3", ""),
 	consoleAlias("grok-4.20-0309-console", "grok-4.20-0309", "grok-4.20-0309", ""),
