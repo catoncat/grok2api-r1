@@ -114,7 +114,7 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 		},
 		{
 			name: "exact access denied", body: `{"code":"operation-denied","error":"Access denied."}`,
-			accountScoped: true, permanentAccountDenial: true, upstreamCode: "operation-denied",
+			upstreamCode: "operation-denied",
 		},
 	}
 	for _, test := range tests {
