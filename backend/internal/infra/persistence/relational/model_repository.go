@@ -45,6 +45,97 @@ const availableRoutePredicate = `
 `
 
 // Build 选路只认真实能力与 verified 绑定：Billing paid/Super 共享推断不授权（用户决策 Q2）。
+// 上游 v3.0.11 的 modelSharedPaidBuild* 共享推断 predicate 不吸收；仅保留账号自身 tier
+// 分类用的 Build Super 判定（分类是对既有能力/绑定约束的额外收窄，不构成授权）。
+const modelAccountBuildSuperPredicate = `(EXISTS (SELECT 1 FROM account_billing_snapshots billing WHERE billing.account_id = account.id AND ` + accountPaidBillingSignals + `) OR (account.provider = 'grok_build' AND account.build_super_entitled = TRUE))`
+
+// These predicates mirror the gateway's client-key scope classification. They
+// are used only by the admin model picker to avoid presenting routes that the
+// selected account scope can never serve.
+const modelAccountBuildFreePredicate = `(account.provider = 'grok_build'
+	AND NOT ` + modelAccountBuildSuperPredicate + `
+	AND (
+		EXISTS (SELECT 1 FROM account_quota_recovery recovery WHERE recovery.account_id = account.id AND recovery.kind = 'free')
+		OR LOWER(TRIM(account.observed_model)) LIKE '%-build-free'
+		OR EXISTS (SELECT 1 FROM account_billing_snapshots billing WHERE billing.account_id = account.id AND ` + accountFreeBillingSignal + `)
+	))`
+
+const modelAccountBuildSuperTierPredicate = `(account.provider = 'grok_build' AND ` + modelAccountBuildSuperPredicate + `)`
+
+const modelAccountWebFreePredicate = `(account.provider = 'grok_web'
+	AND EXISTS (SELECT 1 FROM web_account_profiles profile WHERE profile.account_id = account.id AND profile.tier = 'basic'))`
+
+const modelAccountWebSuperPredicate = `(account.provider = 'grok_web'
+	AND EXISTS (SELECT 1 FROM web_account_profiles profile WHERE profile.account_id = account.id AND profile.tier IN ('super', 'heavy')))`
+
+const modelRouteAccountCapabilityPredicate = `(
+	EXISTS (
+		SELECT 1 FROM model_route_accounts binding
+		WHERE binding.model_route_id = model_routes.id
+			AND binding.account_id = account.id
+	)
+	OR (
+		NOT EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id)
+		AND (
+			EXISTS (
+				SELECT 1 FROM account_model_capabilities capability
+				WHERE capability.account_id = account.id
+					AND capability.upstream_model = model_routes.upstream_model
+			)
+		)
+	)
+)`
+
+const modelAvailableRouteAccountCapabilityPredicate = `(
+	EXISTS (
+		SELECT 1 FROM model_route_accounts binding
+		WHERE binding.model_route_id = model_routes.id
+			AND binding.account_id = account.id
+	)
+	OR (
+		NOT EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id)
+		AND (
+			EXISTS (
+				SELECT 1 FROM account_model_capabilities capability
+				WHERE capability.account_id = account.id
+					AND capability.upstream_model = model_routes.upstream_model
+			)
+		)
+	)
+)`
+
+func modelTierAvailabilityPredicate(tiers []string) string {
+	return modelTierAvailabilityPredicateWithAvailability(tiers, false)
+}
+
+func modelTierAvailabilityPredicateWithAvailability(tiers []string, activeOnly bool) string {
+	parts := make([]string, 0, len(tiers))
+	for _, tier := range tiers {
+		switch tier {
+		case "free":
+			parts = append(parts, modelAccountBuildFreePredicate, modelAccountWebFreePredicate)
+		case "super":
+			parts = append(parts, modelAccountBuildSuperTierPredicate, modelAccountWebSuperPredicate)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	accountPredicate := ""
+	capabilityPredicate := modelRouteAccountCapabilityPredicate
+	if activeOnly {
+		accountPredicate = " AND account.enabled = TRUE AND account.auth_status = 'active'"
+		capabilityPredicate = modelAvailableRouteAccountCapabilityPredicate
+	}
+	return `(model_routes.provider = 'grok_console' OR EXISTS (
+		SELECT 1 FROM provider_accounts account
+		WHERE account.provider = model_routes.provider
+		` + accountPredicate + `
+			AND (` + strings.Join(parts, " OR ") + `)
+			AND ` + capabilityPredicate + `
+	))`
+}
+
 const (
 	modelProviderPriorityExpression = "CASE model_routes.provider WHEN 'grok_build' THEN 0 WHEN 'grok_web' THEN 1 WHEN 'grok_console' THEN 2 ELSE 3 END"
 	modelSupportSortExpression      = `(SELECT COUNT(*) FROM provider_accounts account WHERE account.provider = model_routes.provider AND account.enabled = TRUE AND account.auth_status = 'active' AND (EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id AND binding.account_id = account.id) OR (NOT EXISTS (SELECT 1 FROM model_route_accounts binding WHERE binding.model_route_id = model_routes.id) AND EXISTS (SELECT 1 FROM account_model_capabilities capability WHERE capability.account_id = account.id AND capability.upstream_model = model_routes.upstream_model))))`
@@ -66,12 +157,25 @@ func (r *ModelRepository) notifyInvalidation(ctx context.Context, event reposito
 func (r *ModelRepository) List(ctx context.Context, input repository.ModelListQuery) ([]model.Route, int64, error) {
 	var total int64
 	query := r.db.db.WithContext(ctx).Model(&modelRouteModel{})
+	if input.Filter.ActiveScope {
+		query = r.availableRoutes(query)
+	}
 	if search := strings.TrimSpace(input.Page.Search); search != "" {
 		pattern := "%" + strings.ToLower(search) + "%"
 		query = query.Where("LOWER(public_id) LIKE ? OR LOWER(upstream_model) LIKE ?", pattern, pattern)
 	}
 	if input.Filter.Provider != "" {
 		query = query.Where("provider = ?", input.Filter.Provider)
+	}
+	if len(input.Filter.Providers) > 0 {
+		query = query.Where("provider IN ?", input.Filter.Providers)
+	}
+	tierPredicate := modelTierAvailabilityPredicate(input.Filter.Tiers)
+	if input.Filter.ActiveScope {
+		tierPredicate = modelTierAvailabilityPredicateWithAvailability(input.Filter.Tiers, true)
+	}
+	if tierPredicate != "" {
+		query = query.Where(tierPredicate)
 	}
 	if input.Filter.Enabled != nil {
 		query = query.Where("enabled = ?", *input.Filter.Enabled)
@@ -101,6 +205,25 @@ func (r *ModelRepository) List(ctx context.Context, input repository.ModelListQu
 func (r *ModelRepository) ListEnabled(ctx context.Context) ([]model.Route, error) {
 	var rows []modelRouteModel
 	if err := r.availableRoutes(r.db.db.WithContext(ctx)).Where("enabled = ?", true).Order("public_id ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	values := mapModelRows(rows)
+	if err := r.annotateAvailability(ctx, values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func (r *ModelRepository) ListEnabledForScope(ctx context.Context, filter repository.ModelListFilter) ([]model.Route, error) {
+	query := r.availableRoutes(r.db.db.WithContext(ctx)).Where("enabled = ?", true)
+	if len(filter.Providers) > 0 {
+		query = query.Where("provider IN ?", filter.Providers)
+	}
+	if tierPredicate := modelTierAvailabilityPredicateWithAvailability(filter.Tiers, true); tierPredicate != "" {
+		query = query.Where(tierPredicate)
+	}
+	var rows []modelRouteModel
+	if err := query.Order("public_id ASC, id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	values := mapModelRows(rows)

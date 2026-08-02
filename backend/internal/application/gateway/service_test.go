@@ -184,10 +184,14 @@ func TestGatewayFailsOverBeforeReturningBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = io.ReadAll(compacted.Body)
+	if compacted.MarkFirstToken == nil {
+		t.Fatal("first token marker is nil")
+	}
+	compacted.MarkFirstToken()
 	compacted.Finalize(Usage{}, "resp-compact", "")
 	_ = compacted.Body.Close()
 	logs, total, err = auditRepo.List(ctx, 0, 10)
-	if err != nil || total != 2 || logs[0].Operation != audit.OperationCompaction || !logs[0].Streaming {
+	if err != nil || total != 2 || logs[0].Operation != audit.OperationCompaction || !logs[0].Streaming || logs[0].FirstTokenMS == nil {
 		t.Fatalf("compaction audit = %#v, total=%d, err=%v", logs, total, err)
 	}
 	if _, err := responseRepo.Get(ctx, "resp-compact", clientKey.ID, time.Now().UTC()); !errors.Is(err, repository.ErrNotFound) {
@@ -214,6 +218,16 @@ func TestGatewayFailsOverBeforeReturningBody(t *testing.T) {
 	}
 
 	adapter.resetAttempts()
+	blockedKey := clientKey
+	blockedKey.ProviderScope = clientkey.ProviderScopeConsole
+	if _, err := service.GetResponse(ctx, ResourceInput{ClientKey: blockedKey, ResponseID: "resp-test"}); err == nil {
+		t.Fatal("owned response should be rejected after its provider leaves the key scope")
+	} else {
+		var unavailable *SelectionUnavailableError
+		if !errors.As(err, &unavailable) || unavailable.Code() != "client_key_account_scope_unavailable" || len(adapter.attempts) != 0 {
+			t.Fatalf("scoped owned response error = %#v, attempts = %#v, err = %v", unavailable, adapter.attempts, err)
+		}
+	}
 	resource, err := service.GetResponse(ctx, ResourceInput{ClientKey: clientKey, ResponseID: "resp-test", RawQuery: "include=reasoning.encrypted_content"})
 	if err != nil {
 		t.Fatal(err)
@@ -273,20 +287,69 @@ func TestGatewayFailsOverBeforeReturningBody(t *testing.T) {
 	}
 
 	adapter.resetAttempts()
+	expiredCooldown := time.Now().UTC().Add(-time.Minute)
+	for _, accountID := range []uint64{first.ID, second.ID} {
+		if err := accountRepo.UpdateHealth(ctx, accountID, 3, &expiredCooldown, "previous upstream failures", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selector.ApplyInvalidation(repository.InvalidationEvent{Kind: repository.InvalidationAccountStateChanged, Provider: account.ProviderBuild})
 	interrupted, err := service.CreateResponse(ctx, Input{RequestID: "req-stream-cut", ClientKey: clientKey, PublicModel: "grok-test", Body: []byte(`{"model":"grok-test"}`), PromptCacheSeed: "other-session"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = io.ReadAll(interrupted.Body)
-	interrupted.Finalize(Usage{}, "", "upstream_stream_incomplete")
-	_ = interrupted.Body.Close()
+	healthBlocker := &blockingHealthAccountRepository{
+		AccountRepository: accountRepo, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	selector.accounts = healthBlocker
+	finalized := make(chan struct{})
+	go func() {
+		interrupted.Finalize(Usage{}, "", "upstream_stream_incomplete")
+		close(finalized)
+	}()
+	select {
+	case <-healthBlocker.started:
+	case <-time.After(time.Second):
+		t.Fatal("stream failure health update did not start")
+	}
 	if len(adapter.attempts) != 1 {
 		t.Fatalf("interrupted attempts = %#v", adapter.attempts)
 	}
+	selectedAccountID := adapter.attempts[0]
+	if current, currentErr := concurrency.Current(ctx, accountConcurrencyKey(selectedAccountID)); currentErr != nil || current != 1 {
+		t.Fatalf("account lease was released before stream failure cooldown: current=%d err=%v", current, currentErr)
+	}
+	close(healthBlocker.release)
+	select {
+	case <-finalized:
+	case <-time.After(time.Second):
+		t.Fatal("stream failure finalization did not finish")
+	}
+	_ = interrupted.Body.Close()
 	interruptedAccount, err := accountRepo.Get(ctx, adapter.attempts[0])
 	if err != nil || interruptedAccount.FailureCount != 1 || interruptedAccount.CooldownUntil == nil {
 		t.Fatalf("interrupted account health = %#v, err=%v", interruptedAccount, err)
 	}
+}
+
+type blockingHealthAccountRepository struct {
+	repository.AccountRepository
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *blockingHealthAccountRepository) UpdateHealth(ctx context.Context, id uint64, failureCount int, cooldownUntil *time.Time, lastError string, success bool) error {
+	if !success {
+		r.once.Do(func() { close(r.started) })
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return r.AccountRepository.UpdateHealth(ctx, id, failureCount, cooldownUntil, lastError, success)
 }
 
 func TestRoutingAttemptPolicy(t *testing.T) {
@@ -654,18 +717,37 @@ func TestGatewayTeamModelRateLimitOnlySkipsMatchingTeam(t *testing.T) {
 }
 
 func TestSelectConversationRouteRespectsClientKeyAcrossSharedPublicModel(t *testing.T) {
-	registry := provider.NewRegistry(&failoverAdapter{}, statelessConsoleAdapter{})
+	registry := provider.NewRegistry(&failoverAdapter{}, webStoredResponseAdapter{}, statelessConsoleAdapter{})
 	service := &Service{
 		clientKeys: clientkeyapp.NewService(nil, nil, nil, 60, 4, nil),
 		providers:  registry,
 	}
 	routes := []modeldomain.Route{
 		{ID: 10, PublicID: "Build/grok-shared", Provider: account.ProviderBuild, UpstreamModel: "grok-shared"},
+		{ID: 15, PublicID: "Web/grok-shared", Provider: account.ProviderWeb, UpstreamModel: "grok-shared"},
 		{ID: 20, PublicID: "Console/grok-shared", Provider: account.ProviderConsole, UpstreamModel: "grok-shared"},
 	}
-	selected, err := service.selectConversationRoute(routes, clientkey.Key{AllowedModels: []uint64{20}}, audit.OperationResponses, "/responses", false, nil)
+	selected, err := service.selectConversationRoute(routes, clientkey.Key{ProviderScope: clientkey.ProviderScopeWeb | clientkey.ProviderScopeConsole}, audit.OperationResponses, "/responses", false, nil)
+	if err != nil || selected.ID != 15 {
+		t.Fatalf("provider-scoped route = %#v, err = %v", selected, err)
+	}
+	selected, err = service.selectConversationRoute(routes, clientkey.Key{ProviderScope: clientkey.ProviderScopeConsole, AllowedModels: []uint64{20}}, audit.OperationResponses, "/responses", false, nil)
 	if err != nil || selected.ID != 20 {
 		t.Fatalf("selected route = %#v, err = %v", selected, err)
+	}
+	_, err = service.selectConversationRoute(routes, clientkey.Key{ProviderScope: clientkey.ProviderScopeBuild, AllowedModels: []uint64{20}}, audit.OperationResponses, "/responses", false, nil)
+	if !errors.Is(err, clientkeyapp.ErrModelNotAllowed) {
+		t.Fatalf("scope and model intersection should reject the request: %v", err)
+	}
+	_, err = service.selectConversationRoute(routes[1:], clientkey.Key{ProviderScope: clientkey.ProviderScopeBuild}, audit.OperationResponses, "/responses", false, nil)
+	var unavailable *SelectionUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.Code() != "client_key_account_scope_unavailable" {
+		t.Fatalf("provider scope must not fall back: %#v, err = %v", unavailable, err)
+	}
+	ownership := &inferencedomain.ResponseOwnership{Provider: account.ProviderWeb}
+	_, err = service.selectConversationRoute(routes, clientkey.Key{ProviderScope: clientkey.ProviderScopeBuild}, audit.OperationResponses, "/responses", true, ownership)
+	if !errors.As(err, &unavailable) || unavailable.Code() != "client_key_account_scope_unavailable" {
+		t.Fatalf("owned response must remain inside the updated provider scope: %#v, err = %v", unavailable, err)
 	}
 }
 
@@ -685,6 +767,14 @@ func TestSelectMediaRouteSkipsSameNamedConversationRoute(t *testing.T) {
 	})
 	if err != nil || selected.ID != 20 {
 		t.Fatalf("selected route = %#v, err = %v", selected, err)
+	}
+	_, err = service.selectMediaRoute(routes, clientkey.Key{ProviderScope: clientkey.ProviderScopeBuild}, modeldomain.CapabilityImage, func(providerValue account.Provider) bool {
+		_, ok := registry.ImageGeneration(providerValue)
+		return ok
+	})
+	var unavailable *SelectionUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.Code() != "client_key_account_scope_unavailable" {
+		t.Fatalf("media route must not leave provider scope: %#v, err = %v", unavailable, err)
 	}
 }
 
@@ -1067,6 +1157,14 @@ func TestParseFreeQuotaExhaustion(t *testing.T) {
 	}
 }
 
+func TestParseFreeQuotaExhaustionCurrentBuildFreeLimit(t *testing.T) {
+	body := []byte(`{"code":"subscription:free-usage-exhausted","error":"You've used all the included free usage for model grok-4.5-build-free for now. Usage resets over a rolling 24-hour window — tokens (actual/limit): 537365/500000."}`)
+	used, limit, exhausted := parseFreeQuotaExhaustion(body)
+	if !exhausted || used != 537_365 || limit != 500_000 {
+		t.Fatalf("exhausted=%v used=%d limit=%d", exhausted, used, limit)
+	}
+}
+
 func TestGatewayCoolsFreeBuildAccountsAfterForbidden(t *testing.T) {
 	ctx := context.Background()
 	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "systemic-forbidden.db"))
@@ -1213,7 +1311,7 @@ func TestGatewayRefreshesAndRetriesBuildUnauthorizedOnce(t *testing.T) {
 	if updated.EncryptedAccessToken != "access-new" || updated.AuthStatus != account.AuthStatusActive || updated.RefreshFailureCount != 0 {
 		t.Fatalf("updated credential = %#v", updated)
 	}
-	if err := accountRepo.UpdateCredentialRefreshFailure(ctx, credential.ID, 1, updated.ExpiresAt, "invalid_grant", true); err != nil {
+	if err := accountRepo.UpdateCredentialRefreshFailure(ctx, credential.ID, repository.CredentialRefreshFailure{Count: 1, RetryAt: updated.ExpiresAt, Status: 400, Code: "invalid_grant", Message: "Refresh token has expired", Permanent: true}); err != nil {
 		t.Fatal(err)
 	}
 	adapter.rejectAll.Store(true)

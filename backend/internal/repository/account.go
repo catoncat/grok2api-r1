@@ -32,6 +32,19 @@ type AccountUpsertResult struct {
 	Created bool
 }
 
+// CredentialRefreshFailure is the bounded diagnostic state persisted for the
+// latest failed OAuth refresh. Response must already be redacted by the
+// provider adapter before it reaches persistence.
+type CredentialRefreshFailure struct {
+	Count     int
+	RetryAt   time.Time
+	Status    int
+	Code      string
+	Message   string
+	Response  string
+	Permanent bool
+}
+
 // LinkedDeleteResolution is the server-side expansion of root deletes with optional linked peers.
 type LinkedDeleteResolution struct {
 	RootIDs          []uint64
@@ -81,6 +94,10 @@ type AccountRepository interface {
 	Summarize(ctx context.Context, now time.Time) ([]AccountSummary, error)
 	ListEnabled(ctx context.Context, provider account.Provider) ([]account.Credential, error)
 	ListEnabledAccountIDs(ctx context.Context, provider account.Provider, refreshableOnly bool) ([]uint64, error)
+	// ListEnabledCredentialRefreshAccountIDs includes enabled active and
+	// reauthRequired accounts so an explicit administrator refresh can retry a
+	// previously rejected refresh token once.
+	ListEnabledCredentialRefreshAccountIDs(ctx context.Context, provider account.Provider, refreshableOnly bool) ([]uint64, error)
 	CountProviderAccountsByIDs(ctx context.Context, provider account.Provider, ids []uint64) (int64, error)
 	// FilterMissingBuildConversionIDs 从指定账号中排除已经关联 Build 的 Web 账号。
 	FilterMissingBuildConversionIDs(ctx context.Context, ids []uint64) ([]uint64, error)
@@ -92,13 +109,14 @@ type AccountRepository interface {
 	ListMissingConsoleSyncBatch(ctx context.Context, afterID uint64, limit int) ([]account.Credential, int64, int64, error)
 	HasActive(ctx context.Context, provider account.Provider, upstreamModel, quotaMode string) (bool, error)
 	ListRoutingCandidates(ctx context.Context, provider account.Provider, modelRouteID uint64, upstreamModel, quotaMode string) ([]account.RoutingCandidate, error)
+	GetCredentialMaterial(ctx context.Context, accountID uint64, provider account.Provider) (account.CredentialMaterial, error)
 	Get(ctx context.Context, id uint64) (account.Credential, error)
 	LinkWebToBuild(ctx context.Context, webAccountID, buildAccountID uint64) error
 	GetBillings(ctx context.Context, accountIDs []uint64) (map[uint64]account.Billing, error)
 	GetQuotaRecoveries(ctx context.Context, accountIDs []uint64) (map[uint64]account.QuotaRecovery, error)
 	UpsertByIdentity(ctx context.Context, value account.Credential) (account.Credential, bool, error)
 	Update(ctx context.Context, value account.Credential) (account.Credential, error)
-	UpdateMany(ctx context.Context, ids []uint64, updates AccountUpdates) (int64, error)
+	UpdateMany(ctx context.Context, provider account.Provider, ids []uint64, updates AccountUpdates) (int64, error)
 	Delete(ctx context.Context, id uint64) error
 	DeleteMany(ctx context.Context, ids []uint64) (int64, error)
 	// CleanupAccountStatusBatch 预检并（可选）删除一个有界状态批次；受模型路由
@@ -125,7 +143,7 @@ type AccountRepository interface {
 	ListCriticalCredentialRefreshIDs(ctx context.Context, now, expiresBefore time.Time, limit int) ([]uint64, error)
 	ListDueCredentialRefreshIDs(ctx context.Context, now time.Time, limit int) ([]uint64, error)
 	NextCredentialRefreshDueAt(ctx context.Context) (*time.Time, error)
-	UpdateCredentialRefreshFailure(ctx context.Context, id uint64, failureCount int, retryAt time.Time, errorCode string, permanent bool) error
+	UpdateCredentialRefreshFailure(ctx context.Context, id uint64, failure CredentialRefreshFailure) error
 	UpdateTeamID(ctx context.Context, id uint64, teamID string) error
 	UpdateObservedModel(ctx context.Context, id uint64, model string, observedAt time.Time) error
 	UpdateHealth(ctx context.Context, id uint64, failureCount int, cooldownUntil *time.Time, lastError string, success bool) error

@@ -135,6 +135,7 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 	router.GET("/accounts", h.list)
 	router.GET("/accounts/summary", h.summary)
 	router.GET("/accounts/export", h.exportCredentials)
+	router.POST("/accounts/export", h.exportSelectedCredentials)
 	router.GET("/accounts/:id", h.get)
 	router.POST("/accounts/device/start", h.startDevice)
 	router.POST("/accounts/device/:sessionId/poll", h.pollDevice)
@@ -192,6 +193,11 @@ type batchDeleteRequest struct {
 	IDs                 []string `json:"ids" binding:"required"`
 	Provider            string   `json:"provider" binding:"required"`
 	LinkedDeleteTargets []string `json:"linkedDeleteTargets"`
+}
+
+type credentialExportRequest struct {
+	IDs      []string `json:"ids" binding:"required"`
+	Provider string   `json:"provider" binding:"required"`
 }
 
 type deletionPreviewRequest struct {
@@ -272,7 +278,10 @@ type accountResponse struct {
 	RefreshDueAt               *time.Time              `json:"refreshDueAt,omitempty"`
 	LastRefreshAt              *time.Time              `json:"lastRefreshAt,omitempty"`
 	RefreshFailures            int                     `json:"refreshFailureCount"`
+	LastRefreshErrorStatus     int                     `json:"lastRefreshErrorStatus,omitempty"`
 	LastRefreshError           string                  `json:"lastRefreshErrorCode,omitempty"`
+	LastRefreshErrorMessage    string                  `json:"lastRefreshErrorMessage,omitempty"`
+	LastRefreshErrorResponse   string                  `json:"lastRefreshErrorResponse,omitempty"`
 	Priority                   int                     `json:"priority"`
 	MaxConcurrent              int                     `json:"maxConcurrent"`
 	MinimumRemaining           float64                 `json:"minimumRemaining"`
@@ -432,10 +441,7 @@ func (h *Handler) batchUpdate(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalidId", err.Error())
 		return
 	}
-	if !h.validateProviderIDs(c, ids, request.Provider) {
-		return
-	}
-	updated, err := h.service.BatchUpdate(c.Request.Context(), ids, accountapp.UpdateInput{Enabled: request.Enabled, Priority: request.Priority, MaxConcurrent: request.MaxConcurrent, MinimumRemaining: request.MinimumRemaining})
+	updated, err := h.service.BatchUpdate(c.Request.Context(), accountdomain.Provider(request.Provider), ids, accountapp.UpdateInput{Enabled: request.Enabled, Priority: request.Priority, MaxConcurrent: request.MaxConcurrent, MinimumRemaining: request.MinimumRemaining})
 	if err != nil {
 		h.writeServiceError(c, "accountBatchUpdateFailed", err, http.StatusInternalServerError, "批量更新账号失败")
 		return
@@ -1042,14 +1048,70 @@ func (h *Handler) refreshWebQuota(c *gin.Context) {
 
 func (h *Handler) exportCredentials(c *gin.Context) {
 	providerValue := accountdomain.Provider(c.DefaultQuery("provider", string(accountdomain.ProviderBuild)))
+	if limitText, pagedExport := c.GetQuery("limit"); pagedExport {
+		if _, usesOffset := c.GetQuery("offset"); usesOffset {
+			response.Error(c, http.StatusBadRequest, "accountExportFailed", "分批导出不支持 offset，请使用服务端返回的 afterId")
+			return
+		}
+		limit, err := strconv.Atoi(strings.TrimSpace(limitText))
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "accountExportFailed", "导出数量必须为整数")
+			return
+		}
+		afterID, err := strconv.ParseUint(strings.TrimSpace(c.DefaultQuery("afterId", "0")), 10, 64)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "accountExportFailed", "导出游标必须为非负整数")
+			return
+		}
+		snapshotMaxID, err := strconv.ParseUint(strings.TrimSpace(c.DefaultQuery("snapshotMaxId", "0")), 10, 64)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "accountExportFailed", "导出快照上界必须为非负整数")
+			return
+		}
+		result, exportErr := h.service.ExportProviderCredentialsCursor(c.Request.Context(), providerValue, afterID, snapshotMaxID, limit)
+		if exportErr != nil {
+			h.writeServiceError(c, "accountExportFailed", exportErr, http.StatusInternalServerError, "导出账号失败")
+			return
+		}
+		c.Header("X-Export-Next-ID", strconv.FormatUint(result.NextID, 10))
+		c.Header("X-Export-Snapshot-Max-ID", strconv.FormatUint(result.SnapshotMaxID, 10))
+		c.Header("X-Export-Has-More", strconv.FormatBool(result.HasMore))
+		h.writeCredentialExport(c, providerValue, result.ExportResult)
+		return
+	}
 	result, err := h.service.ExportProviderCredentials(c.Request.Context(), providerValue)
 	if err != nil {
 		h.writeServiceError(c, "accountExportFailed", err, http.StatusInternalServerError, "导出账号失败")
 		return
 	}
+	h.writeCredentialExport(c, providerValue, result)
+}
+
+func (h *Handler) exportSelectedCredentials(c *gin.Context) {
+	var request credentialExportRequest
+	if c.ShouldBindJSON(&request) != nil {
+		response.Error(c, http.StatusBadRequest, "invalidRequest", "请求参数无效")
+		return
+	}
+	ids, err := parseIDs(request.IDs)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalidId", err.Error())
+		return
+	}
+	providerValue := accountdomain.Provider(request.Provider)
+	result, err := h.service.ExportProviderCredentialsByIDs(c.Request.Context(), providerValue, ids)
+	if err != nil {
+		h.writeServiceError(c, "accountExportFailed", err, http.StatusInternalServerError, "导出账号失败")
+		return
+	}
+	h.writeCredentialExport(c, providerValue, result)
+}
+
+func (h *Handler) writeCredentialExport(c *gin.Context, providerValue accountdomain.Provider, result accountapp.ExportResult) {
 	filename := "grok2api-" + string(providerValue) + "-accounts-" + time.Now().UTC().Format("20060102T150405Z") + ".json"
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
+	c.Header("Access-Control-Expose-Headers", "Content-Disposition, X-Exported-Accounts, X-Export-Next-ID, X-Export-Snapshot-Max-ID, X-Export-Has-More")
 	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("X-Exported-Accounts", strconv.Itoa(result.Count))
@@ -1182,6 +1244,8 @@ func (h *Handler) writeServiceError(c *gin.Context, code string, err error, fall
 		response.Error(c, http.StatusBadRequest, "accountExportLimitExceeded", err.Error())
 	case errors.Is(err, accountapp.ErrInvalidInput), errors.Is(err, accountapp.ErrInvalidImport):
 		response.Error(c, http.StatusBadRequest, code, err.Error())
+	case errors.Is(err, accountapp.ErrAccountPoolMismatch):
+		response.Error(c, http.StatusConflict, "accountPoolMismatch", err.Error())
 	case errors.Is(err, accountapp.ErrConflict):
 		response.Error(c, http.StatusConflict, code, err.Error())
 	case errors.Is(err, accountapp.ErrNotFound):
@@ -1314,7 +1378,7 @@ func newAccountResponse(value accountapp.View) accountResponse {
 		WebTierSyncedAt: c.WebTierSyncedAt, WebNSFWEnabledAt: c.WebNSFWEnabledAt, WebTermsAcceptedAt: c.WebTermsAcceptedAt, Name: c.Name, Email: c.Email, UserID: c.UserID, TeamID: c.TeamID,
 		Enabled: c.Enabled, AuthStatus: string(c.AuthStatus), Refreshable: c.EncryptedRefreshToken != "",
 		RefreshDueAt: c.RefreshDueAt, LastRefreshAt: c.LastRefreshAt,
-		RefreshFailures: c.RefreshFailureCount, LastRefreshError: c.LastRefreshErrorCode,
+		RefreshFailures: c.RefreshFailureCount, LastRefreshErrorStatus: c.LastRefreshErrorStatus, LastRefreshError: c.LastRefreshErrorCode, LastRefreshErrorMessage: c.LastRefreshErrorMessage, LastRefreshErrorResponse: c.LastRefreshErrorResponse,
 		Priority: c.Priority, MaxConcurrent: c.MaxConcurrent, MinimumRemaining: c.MinimumRemaining,
 		FailureCount: c.FailureCount, CooldownUntil: c.CooldownUntil, LastError: c.LastError,
 		LastUsedAt: c.LastUsedAt, LinkedAccountID: c.LinkedAccountID, LinkedName: c.LinkedAccountName, LinkedProvider: string(c.LinkedProvider),

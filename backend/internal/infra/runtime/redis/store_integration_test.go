@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"errors"
+	"net"
 	"os"
 	"strconv"
 	"sync"
@@ -54,6 +56,28 @@ func TestRedisRuntimeStoreIntegration(t *testing.T) {
 		t.Fatalf("duplicate concurrency acquire = %v, err = %v", acquired, err)
 	}
 	release()
+	releaseFailure := &failOnceRedisCommandHook{}
+	store.client.AddHook(releaseFailure)
+	release, acquired, err = limiter.Acquire(ctx, "account:release-retry", 1)
+	if err != nil || !acquired {
+		t.Fatalf("release retry acquire = %v, err = %v", acquired, err)
+	}
+	releaseFailure.arm("evalsha")
+	release()
+	releaseDeadline := time.Now().Add(2 * time.Second)
+	for {
+		current, currentErr := limiter.Current(ctx, "account:release-retry")
+		if currentErr != nil {
+			t.Fatal(currentErr)
+		}
+		if current == 0 {
+			break
+		}
+		if time.Now().After(releaseDeadline) {
+			t.Fatalf("failed concurrency release was not reconciled: current=%d", current)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	concurrencyKey := store.key("concurrency", "snapshot")
 	now := time.Now().UTC()
 	if err := store.client.ZAdd(ctx, concurrencyKey,
@@ -298,6 +322,42 @@ func TestRedisRuntimeStoreIntegration(t *testing.T) {
 	}
 }
 
+type failOnceRedisCommandHook struct {
+	mu      sync.Mutex
+	command string
+}
+
+func (h *failOnceRedisCommandHook) arm(command string) {
+	h.mu.Lock()
+	h.command = command
+	h.mu.Unlock()
+}
+
+func (h *failOnceRedisCommandHook) DialHook(next redisclient.DialHook) redisclient.DialHook {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		return next(ctx, network, address)
+	}
+}
+
+func (h *failOnceRedisCommandHook) ProcessHook(next redisclient.ProcessHook) redisclient.ProcessHook {
+	return func(ctx context.Context, command redisclient.Cmder) error {
+		h.mu.Lock()
+		fail := h.command != "" && command.Name() == h.command
+		if fail {
+			h.command = ""
+		}
+		h.mu.Unlock()
+		if fail {
+			return errors.New("injected Redis command failure")
+		}
+		return next(ctx, command)
+	}
+}
+
+func (h *failOnceRedisCommandHook) ProcessPipelineHook(next redisclient.ProcessPipelineHook) redisclient.ProcessPipelineHook {
+	return next
+}
+
 func cleanupRedisTestPrefix(t *testing.T, ctx context.Context, client *redisclient.Client, prefix string) {
 	t.Helper()
 	var cursor uint64
@@ -391,6 +451,18 @@ func TestRedisInvalidationBusIntegration(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("second invalidation notification was not delivered")
+	}
+	clientKeyEvent := repository.InvalidationEvent{Kind: repository.InvalidationClientKeyChanged, ClientKeyID: 42, SourceInstance: "instance-a"}
+	if err := store.PublishInvalidation(ctx, clientKeyEvent); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case clientKeyInvalidation := <-received:
+		if clientKeyInvalidation.Layer() != repository.InvalidationLayerClientKey || clientKeyInvalidation.ClientKeyID != 42 || clientKeyInvalidation.Revision == 0 {
+			t.Fatalf("client-key invalidation = %#v", clientKeyInvalidation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("client-key invalidation notification was not delivered")
 	}
 	cancel()
 	if err := <-done; err != nil {

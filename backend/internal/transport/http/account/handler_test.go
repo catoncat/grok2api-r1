@@ -50,6 +50,15 @@ func TestNewAccountResponseExposesAllLinkedAccounts(t *testing.T) {
 	}
 }
 
+func TestNewAccountResponseExposesCredentialRefreshError(t *testing.T) {
+	response := newAccountResponse(accountapp.View{Credential: accountdomain.Credential{
+		Provider: accountdomain.ProviderBuild, LastRefreshErrorStatus: 400, LastRefreshErrorCode: "invalid_grant", LastRefreshErrorMessage: "Refresh token has expired", LastRefreshErrorResponse: `{"error":"invalid_grant"}`,
+	}})
+	if response.LastRefreshErrorStatus != 400 || response.LastRefreshError != "invalid_grant" || response.LastRefreshErrorMessage != "Refresh token has expired" || response.LastRefreshErrorResponse == "" {
+		t.Fatalf("refresh error = %#v", response)
+	}
+}
+
 type accountSynchronizerStub struct {
 	accountIDs []uint64
 }
@@ -84,6 +93,31 @@ func TestWriteServiceErrorUsesCredentialLimitCodes(t *testing.T) {
 				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestCredentialExportRejectsOffsetPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("GET", "/api/admin/v1/accounts/export?provider=grok_build&limit=1000&offset=1000", nil)
+	new(Handler).exportCredentials(ctx)
+	if recorder.Code != 400 || !strings.Contains(recorder.Body.String(), "afterId") {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCredentialExportExposesBatchMetadataHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	new(Handler).writeCredentialExport(ctx, accountdomain.ProviderBuild, accountapp.ExportResult{Data: []byte(`[]`)})
+
+	exposed := recorder.Header().Get("Access-Control-Expose-Headers")
+	for _, header := range []string{"X-Exported-Accounts", "X-Export-Next-ID", "X-Export-Snapshot-Max-ID", "X-Export-Has-More"} {
+		if !strings.Contains(exposed, header) {
+			t.Fatalf("exposed headers %q do not include %s", exposed, header)
+		}
 	}
 }
 

@@ -81,6 +81,8 @@ type AccountListFilter struct {
 	AccountIDs  []uint64
 	RestrictIDs bool
 	ExcludeIDs  []uint64
+	AfterID     uint64
+	ThroughID   uint64
 	Now         time.Time
 }
 
@@ -101,8 +103,11 @@ type AccountSummary struct {
 }
 
 type ModelListFilter struct {
-	Provider string
-	Enabled  *bool
+	Provider    string
+	Providers   []string
+	Tiers       []string
+	Enabled     *bool
+	ActiveScope bool
 }
 
 type ModelListQuery struct {
