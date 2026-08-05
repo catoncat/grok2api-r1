@@ -39,10 +39,15 @@ type UpstreamFailure struct {
 	// as invalid arguments, content policy, or a ZDR-gated operation. Retrying the
 	// same request with another credential cannot fix it.
 	RequestScopedForbidden bool
-	CredentialRejected     bool
-	Fingerprint            string
-	RetryAfter             time.Duration
-	Cause                  error
+	// AntiBotRejection 标记上游反爬规则按请求打分产生的 403（如
+	// "Request rejected by anti-bot rules"，code=7）。生产证据（15/15 双 attempt
+	// 全拒）表明：同账号 + 同请求体立即重试必然再拒，必须换账号重试；它不是
+	// 账号能力问题，不冷却账号；它不是节点相关问题，不喂 egress 证据。
+	AntiBotRejection   bool
+	CredentialRejected bool
+	Fingerprint        string
+	RetryAfter         time.Duration
+	Cause              error
 }
 
 func (e *UpstreamFailure) Error() string {
@@ -132,6 +137,9 @@ func newHTTPUpstreamFailure(status int, body []byte, accountID uint64, accountNa
 		if isSafetyRejection(metadataText) || isSafetyRejection(string(body)) {
 			failure.SafetyRejection = true
 			break
+		}
+		if isAntiBotRejection(metadataText) {
+			failure.AntiBotRejection = true
 		}
 		if isRequestScopedForbidden(upstreamCode, metadataText) {
 			failure.RequestScopedForbidden = true
@@ -250,6 +258,12 @@ func isRequestScopedForbidden(upstreamCode, text string) bool {
 		"operation is unavailable under zdr", "operation unavailable under zdr",
 	)
 
+}
+
+// isAntiBotRejection 只匹配上游明确的反爬规则拒绝措辞（anti-bot）。刻意保持窄：
+// 区域/策略/凭据 403 不含该词，避免把其他 403 误引进换账号重试路径。
+func isAntiBotRejection(text string) bool {
+	return strings.Contains(text, "anti-bot") || strings.Contains(text, "anti bot")
 }
 
 func isDefinitiveAccountBlock(text string) bool {

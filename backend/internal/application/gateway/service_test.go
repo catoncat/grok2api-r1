@@ -3802,3 +3802,112 @@ func testCipher(t *testing.T) *security.Cipher {
 	}
 	return cipher
 }
+
+type antiBotAdapter struct {
+	mu       sync.Mutex
+	rejectID uint64
+	attempts []uint64
+}
+
+func (a *antiBotAdapter) Provider() account.Provider { return account.ProviderWeb }
+func (a *antiBotAdapter) Definition() provider.Definition {
+	return provider.Definition{
+		Provider:     account.ProviderWeb,
+		Conversation: provider.ConversationSurface{Responses: true},
+		Inference:    provider.InferencePolicy{Usage: provider.UsageEstimated, RetryForbiddenAsEgress: true},
+	}
+}
+func (a *antiBotAdapter) ForwardResponse(_ context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {
+	a.mu.Lock()
+	a.attempts = append(a.attempts, request.Credential.ID)
+	a.mu.Unlock()
+	if request.Credential.ID == a.rejectID {
+		return &provider.Response{
+			StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{"error":{"code":7,"message":"Request rejected by anti-bot rules","details":[]}}`)),
+		}, nil
+	}
+	return &provider.Response{
+		StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header),
+		Body: io.NopCloser(strings.NewReader(`{"id":"resp-ok"}`)),
+	}, nil
+}
+
+// 生产证据（15/15 双 attempt 全拒）：anti-bot 按请求打分，同账号同请求体立即重试
+// 必再拒；正确行为是换账号重试且不冷却被拒账号。
+func TestGatewayAntiBotRejectionSwitchesAccountWithoutCooldown(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "anti-bot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	responseRepo := relational.NewResponseRepository(database)
+	keyRepo := relational.NewClientKeyRepository(database)
+	first, _, err := accountRepo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, Name: "first", SourceKey: "first",
+		EncryptedAccessToken: "first", Enabled: true, AuthStatus: account.AuthStatusActive,
+		Priority: 300, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := accountRepo.UpsertByIdentity(ctx, account.Credential{
+		Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, Name: "second", SourceKey: "second",
+		EncryptedAccessToken: "second", Enabled: true, AuthStatus: account.AuthStatusActive,
+		Priority: 200, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.UpsertDiscovered(ctx, account.ProviderWeb, []string{"grok-web-ab"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, credential := range []account.Credential{first, second} {
+		if err := modelRepo.ReplaceAccountCapabilities(ctx, credential.ID, []string{"grok-web-ab"}, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clientKey, err := keyRepo.Create(ctx, clientkey.Key{
+		Name: "ab-key", Prefix: "ab", SecretHash: strings.Repeat("c", 64), EncryptedSecret: "encrypted",
+		Enabled: true, RPMLimit: 120, MaxConcurrent: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &antiBotAdapter{rejectID: first.ID}
+	registry := provider.NewRegistry(adapter)
+	sticky := memory.NewStickyStore()
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), sticky, registry, testCipher(t), nil)
+	selector := NewSelector(accountRepo, memory.NewConcurrencyLimiter(), sticky, registry, time.Hour, time.Second, time.Minute)
+	service := NewService(modelRepo, auditRepo, accountService, clientkeyapp.NewService(nil, nil, nil, 60, 4, nil), registry, selector, responseRepo, 3)
+
+	result, err := service.CreateResponse(ctx, Input{
+		RequestID: "req-anti-bot", ClientKey: clientKey, PublicModel: "grok-web-ab",
+		Body: []byte(`{"model":"grok-web-ab","input":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("anti-bot rejection must retry with another account: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", result.StatusCode)
+	}
+	_ = result.Body.Close()
+	result.Finalize(Usage{}, "", "")
+	if len(adapter.attempts) != 2 || adapter.attempts[0] != first.ID || adapter.attempts[1] != second.ID {
+		t.Fatalf("attempts = %#v, want rejected account first then a different account", adapter.attempts)
+	}
+	observed, err := accountRepo.Get(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.FailureCount != 0 || observed.CooldownUntil != nil || observed.AuthStatus != account.AuthStatusActive {
+		t.Fatalf("anti-bot rejection must not penalize the account: %#v", observed)
+	}
+}

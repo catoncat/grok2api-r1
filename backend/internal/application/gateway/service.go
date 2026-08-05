@@ -1194,6 +1194,15 @@ attemptLoop:
 				s.logger.Warn("upstream_request_failed", "request_id", input.RequestID, "account_id", credential.ID, "provider", credential.Provider, "status", response.StatusCode, "upstream_code", lastFailure.UpstreamCode, "account_scoped", lastFailure.AccountScoped, "account_blocked", true)
 				continue
 			} else if egressForbidden && !finalEgressForbidden {
+				if lastFailure.AntiBotRejection {
+					// 反爬按请求打分：同账号 + 同请求体立即重试必再拒（生产证据 15/15）。
+					// 账号保持 excluded 换账号重试（独立一次抽取）；不冷却账号
+					// （非账号能力问题），不喂 egress 证据（非节点相关）。
+					lease.Release()
+					lastErr = fmt.Errorf("上游出口会话被拒绝")
+					s.logger.Warn("upstream_anti_bot_rejection", "request_id", input.RequestID, "account_id", credential.ID, "provider", credential.Provider, "status", response.StatusCode, "upstream_code", lastFailure.UpstreamCode)
+					continue
+				}
 				// A non-blocking 403 is an egress/browser-session failure and must not penalize the account.
 				delete(excluded, credential.ID)
 				if selection != nil {

@@ -48,6 +48,7 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 		modelPermissionDenied  bool
 		safetyRejection        bool
 		requestScopedForbidden bool
+		antiBotRejection       bool
 		quotaExhausted         bool
 		freeQuotaExhausted     bool
 		modelQuotaExhausted    bool
@@ -108,6 +109,11 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 			requestScopedForbidden: true,
 		},
 		{
+			name: "anti-bot rules rejection", body: `{"error":{"code":7,"message":"Request rejected by anti-bot rules","details":[]}}`,
+			// 数字 code 不进入 UpstreamCode；分类仅依赖 anti-bot 措辞。
+			antiBotRejection: true,
+		},
+		{
 			name: "free model quota", status: http.StatusForbidden, body: `{"error":"You've used all the included free usage for model grok-build"}`,
 			accountScoped: true, quotaExhausted: true, freeQuotaExhausted: true, modelQuotaExhausted: true,
 		},
@@ -152,7 +158,7 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 				status = http.StatusForbidden
 			}
 			failure := newHTTPUpstreamFailure(status, []byte(test.body), 42, "build")
-			if failure.HTTPStatus != status || failure.AccountScoped != test.accountScoped || failure.AccountBlocked != test.accountBlocked || failure.PermanentAccountDenial != test.permanentAccountDenial || failure.ModelPermissionDenied != test.modelPermissionDenied || failure.SafetyRejection != test.safetyRejection || failure.RequestScopedForbidden != test.requestScopedForbidden || failure.QuotaExhausted != test.quotaExhausted || failure.FreeQuotaExhausted != test.freeQuotaExhausted || failure.ModelQuotaExhausted != test.modelQuotaExhausted || failure.SpendingLimitBlocked != test.spendingLimitBlocked || failure.UpstreamCode != test.upstreamCode {
+			if failure.HTTPStatus != status || failure.AccountScoped != test.accountScoped || failure.AccountBlocked != test.accountBlocked || failure.PermanentAccountDenial != test.permanentAccountDenial || failure.ModelPermissionDenied != test.modelPermissionDenied || failure.SafetyRejection != test.safetyRejection || failure.RequestScopedForbidden != test.requestScopedForbidden || failure.AntiBotRejection != test.antiBotRejection || failure.QuotaExhausted != test.quotaExhausted || failure.FreeQuotaExhausted != test.freeQuotaExhausted || failure.ModelQuotaExhausted != test.modelQuotaExhausted || failure.SpendingLimitBlocked != test.spendingLimitBlocked || failure.UpstreamCode != test.upstreamCode {
 				t.Fatalf("failure = %#v", failure)
 			}
 			if test.upstreamCode == "permission-denied" && (failure.ClientCredentialErrorCode() != "permission-denied" || failure.AuditCode() != "upstream_forbidden_permission_denied") {
