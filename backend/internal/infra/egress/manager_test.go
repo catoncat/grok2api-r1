@@ -21,6 +21,7 @@ import (
 
 	accountdomain "github.com/chenyme/grok2api/backend/internal/domain/account"
 	domain "github.com/chenyme/grok2api/backend/internal/domain/egress"
+	settingsdomain "github.com/chenyme/grok2api/backend/internal/domain/settings"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 	"github.com/chenyme/grok2api/backend/internal/repository"
 )
@@ -77,14 +78,14 @@ func TestBuildResponseHeaderTimeoutHotUpdateRebuildsCachedClients(t *testing.T) 
 		clients = append(clients, client)
 		return client, nil
 	}
-	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false); err != nil {
+	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	manager.UpdateBuildResponseHeaderTimeout(7 * time.Minute)
 	if len(clients) != 1 || clients[0].closedIdle != 1 {
 		t.Fatalf("old clients=%d closed=%d", len(clients), clients[0].closedIdle)
 	}
-	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false); err != nil {
+	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(observed) != 2 || observed[0] != 5*time.Minute || observed[1] != 7*time.Minute {
@@ -158,6 +159,15 @@ func TestCanceledRequestDoesNotInvalidateDirectClient(t *testing.T) {
 				t.Fatal("canceled request invalidated the direct Build client")
 			}
 		})
+	}
+}
+
+func TestConsoleAssetForbiddenDoesNotPenalizeProxy(t *testing.T) {
+	repository := &mutableEgressRepository{node: domain.Node{ID: 1, Name: "console", Scope: domain.ScopeConsole, Enabled: true, Health: 1}}
+	manager := NewManager(repository, nil)
+	manager.FeedbackForScope(context.Background(), domain.ScopeConsoleAsset, 1, http.StatusForbidden, nil)
+	if repository.updates != 0 || repository.node.Health != 1 || repository.node.CooldownUntil != nil {
+		t.Fatalf("Console asset object rejection changed proxy health: updates=%d node=%#v", repository.updates, repository.node)
 	}
 }
 
@@ -495,7 +505,7 @@ func TestClientCreationDoesNotHoldManagerLock(t *testing.T) {
 	}
 	result := make(chan error, 1)
 	go func() {
-		_, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false)
+		_, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false, "")
 		result <- err
 	}()
 	<-started
@@ -556,7 +566,7 @@ func TestClientCacheCoalescesLastUsedWrites(t *testing.T) {
 	manager := NewManager(egressRepositoryTestStub{}, nil)
 	client := &scriptedRequestClient{}
 	manager.newBuildClient = func(string, time.Duration) (requestClient, error) { return client, nil }
-	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false); err != nil {
+	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -571,7 +581,7 @@ func TestClientCacheCoalescesLastUsedWrites(t *testing.T) {
 	manager.lastClientCleanup = base
 	manager.clientMu.Unlock()
 
-	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false); err != nil {
+	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	manager.clientMu.RLock()
@@ -588,7 +598,7 @@ func TestClientCacheCoalescesLastUsedWrites(t *testing.T) {
 	manager.clients[key] = value
 	manager.lastClientCleanup = time.Now().UTC()
 	manager.clientMu.Unlock()
-	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false); err != nil {
+	if _, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	manager.clientMu.RLock()
@@ -617,7 +627,7 @@ func TestClientCreationDiscardsInvalidatedResult(t *testing.T) {
 	result := make(chan cachedClient, 1)
 	errorsCh := make(chan error, 1)
 	go func() {
-		value, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false)
+		value, err := manager.clientFor(1, domain.ScopeBuild, "", "", "", false, "")
 		if err != nil {
 			errorsCh <- err
 			return
@@ -994,6 +1004,110 @@ func TestAcquireCredentialUsesExplicitBoundNode(t *testing.T) {
 	defer lease.Release()
 	if lease.NodeID != 2 || lease.NodeName != "bound-node" {
 		t.Fatalf("bound lease = node %d (%q)", lease.NodeID, lease.NodeName)
+	}
+}
+
+func TestConsoleAssetCredentialPrefersDedicatedNodeWithoutCookies(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptProxy := func(raw string) string {
+		t.Helper()
+		value, encryptErr := cipher.Encrypt(raw)
+		if encryptErr != nil {
+			t.Fatal(encryptErr)
+		}
+		return value
+	}
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{
+		{ID: 1, Name: "web", Scope: domain.ScopeWeb, Enabled: true, Health: 1, EncryptedProxyURL: encryptProxy("http://web.example:8080")},
+		{ID: 2, Name: "console", Scope: domain.ScopeConsole, Enabled: true, Health: 1, EncryptedProxyURL: encryptProxy("http://console.example:8080")},
+		{ID: 3, Name: "console-assets", Scope: domain.ScopeConsoleAsset, Enabled: true, Health: 1, EncryptedProxyURL: encryptProxy("http://assets.example:8080"), EncryptedCloudflareCookie: "damaged-node-cookie", UserAgent: "asset-agent"},
+	}}, cipher)
+	lease, err := manager.AcquireCredential(context.Background(), domain.ScopeConsoleAsset, accountdomain.Credential{
+		ID: 42, Provider: accountdomain.ProviderConsole, EncryptedCloudflareCookie: "damaged-account-cookie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if lease.NodeID != 3 || lease.Scope != domain.ScopeConsoleAsset || lease.UserAgent != "asset-agent" {
+		t.Fatalf("asset lease = %#v", lease)
+	}
+	if lease.CFCookies != "" {
+		t.Fatalf("anonymous Console asset lease exposed cookies: %q", lease.CFCookies)
+	}
+}
+
+func TestConsoleAssetCredentialPreservesExplicitConsoleBinding(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundProxy, err := cipher.Encrypt("http://bound-console.example:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetProxy, err := cipher.Encrypt("http://assets.example:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{
+		{ID: 2, Name: "bound-console", Scope: domain.ScopeConsole, Enabled: true, Health: 1, EncryptedProxyURL: boundProxy},
+		{ID: 3, Name: "console-assets", Scope: domain.ScopeConsoleAsset, Enabled: true, Health: 1, EncryptedProxyURL: assetProxy},
+	}}, cipher)
+	lease, err := manager.AcquireCredential(context.Background(), domain.ScopeConsoleAsset, accountdomain.Credential{
+		ID: 42, Provider: accountdomain.ProviderConsole, EgressNodeID: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	if lease.NodeID != 2 || lease.NodeName != "bound-console" {
+		t.Fatalf("explicit Console binding was not preserved: node=%d name=%q", lease.NodeID, lease.NodeName)
+	}
+}
+
+func TestConsoleAssetClientDoesNotEvictPrimaryConsoleClient(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyURL, err := cipher.Encrypt("http://console.example:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := cipher.Encrypt("cf_clearance=console")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{nodes: []domain.Node{{
+		ID: 2, Name: "console", Scope: domain.ScopeConsole, Enabled: true, Health: 1, EncryptedProxyURL: proxyURL,
+	}}}, cipher)
+	credential := accountdomain.Credential{
+		ID: 42, Provider: accountdomain.ProviderConsole, EgressNodeID: 2, EncryptedCloudflareCookie: cookie,
+	}
+	primary, err := manager.AcquireCredential(context.Background(), domain.ScopeConsole, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primary.Release()
+	asset, err := manager.AcquireCredential(context.Background(), domain.ScopeConsoleAsset, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer asset.Release()
+	primaryAgain, err := manager.AcquireCredential(context.Background(), domain.ScopeConsole, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primaryAgain.Release()
+	if primary.client != primaryAgain.client {
+		t.Fatal("Console asset download evicted the primary Console connection pool")
+	}
+	if primary.client == asset.client || len(manager.clients) != 2 {
+		t.Fatalf("primary and anonymous asset clients were not isolated: cached=%d", len(manager.clients))
 	}
 }
 
@@ -2897,3 +3011,218 @@ func TestWebSuccessClearsUnconfirmedRejection(t *testing.T) {
 		t.Fatalf("web feedback after recovery = %#v", repository.node)
 	}
 }
+func TestAccountIsolatedBuildEnvironmentDirectUsesDedicatedFactoryAndPools(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{}, cipher)
+	manager.UpdateAccountIsolatedConnections(true)
+	var regularCalls, environmentCalls int
+	manager.newBuildClient = func(string, time.Duration) (requestClient, error) {
+		regularCalls++
+		return &scriptedRequestClient{}, nil
+	}
+	manager.newBuildEnvClient = func(time.Duration) (requestClient, error) {
+		environmentCalls++
+		return &scriptedRequestClient{}, nil
+	}
+
+	firstCtx := WithAccountIdentity(context.Background(), "grok_build_1")
+	first, configured, err := manager.AcquireBuildEnvironmentDirectIfIsolated(firstCtx, "1")
+	if err != nil || !configured {
+		t.Fatal(err)
+	}
+	defer first.Release()
+	second, configured, err := manager.AcquireBuildEnvironmentDirectIfIsolated(WithAccountIdentity(context.Background(), "grok_build_2"), "2")
+	if err != nil || !configured {
+		t.Fatal(err)
+	}
+	defer second.Release()
+	firstAgain, configured, err := manager.AcquireBuildEnvironmentDirectIfIsolated(firstCtx, "1")
+	if err != nil || !configured {
+		t.Fatal(err)
+	}
+	defer firstAgain.Release()
+
+	if regularCalls != 0 || environmentCalls != 2 {
+		t.Fatalf("Build client factories: regular=%d environment=%d", regularCalls, environmentCalls)
+	}
+	if first.client == second.client || first.client != firstAgain.client {
+		t.Fatal("environment-proxy Build pools were not isolated per account and reused within account")
+	}
+}
+
+func TestAccountIsolatedConnectionsDisabledKeepsSharedDirectPool(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{}, cipher)
+	manager.UpdateAccountIsolatedConnections(false)
+
+	first, err := manager.AcquireCredential(context.Background(), domain.ScopeWeb, accountdomain.Credential{
+		ID: 1, Provider: accountdomain.ProviderWeb, AuthType: accountdomain.AuthTypeSSO,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Release()
+	second, err := manager.AcquireCredential(context.Background(), domain.ScopeWeb, accountdomain.Credential{
+		ID: 2, Provider: accountdomain.ProviderWeb, AuthType: accountdomain.AuthTypeSSO,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Release()
+	if first.client != second.client {
+		t.Fatal("shared direct pool was split while account isolation was disabled")
+	}
+}
+
+func TestAccountIsolatedConnectionsSeparatesDirectClientsByAccount(t *testing.T) {
+	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(egressRepositoryTestStub{}, cipher)
+	manager.UpdateAccountIsolatedConnections(true)
+
+	firstCtx := WithAccountIdentity(context.Background(), "grok_web_1")
+	first, err := manager.AcquireCredential(firstCtx, domain.ScopeWeb, accountdomain.Credential{
+		ID: 1, Provider: accountdomain.ProviderWeb, AuthType: accountdomain.AuthTypeSSO,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Release()
+
+	secondCtx := WithAccountIdentity(context.Background(), "grok_web_2")
+	second, err := manager.AcquireCredential(secondCtx, domain.ScopeWeb, accountdomain.Credential{
+		ID: 2, Provider: accountdomain.ProviderWeb, AuthType: accountdomain.AuthTypeSSO,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Release()
+
+	if first.client == second.client {
+		t.Fatal("different accounts shared one TCP client pool while account isolation was enabled")
+	}
+
+	firstAgain, err := manager.AcquireCredential(firstCtx, domain.ScopeWeb, accountdomain.Credential{
+		ID: 1, Provider: accountdomain.ProviderWeb, AuthType: accountdomain.AuthTypeSSO,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstAgain.Release()
+	if firstAgain.client != first.client {
+		t.Fatal("same account did not reuse its isolated connection pool")
+	}
+}
+
+func TestAccountIsolationHotUpdateEvictsOldPools(t *testing.T) {
+	manager := NewManager(egressRepositoryTestStub{}, nil)
+	manager.UpdateAccountIsolatedConnections(true)
+	manager.newBuildClient = func(string, time.Duration) (requestClient, error) {
+		return &scriptedRequestClient{}, nil
+	}
+	first, err := manager.clientFor(0, domain.ScopeBuild, "", "", "", false, "account-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.clientFor(0, domain.ScopeBuild, "", "", "", false, "account-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.UpdateAccountIsolatedConnections(false)
+	if first.client.(*scriptedRequestClient).closedIdle != 1 || second.client.(*scriptedRequestClient).closedIdle != 1 {
+		t.Fatal("hot update did not close both isolated idle pools")
+	}
+	manager.clientMu.RLock()
+	remaining := len(manager.clients)
+	manager.clientMu.RUnlock()
+	if remaining != 0 {
+		t.Fatalf("stale isolated pools remain after hot update: %d", remaining)
+	}
+
+	sharedFirst, err := manager.clientFor(0, domain.ScopeBuild, "", "", "", false, "account-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedSecond, err := manager.clientFor(0, domain.ScopeBuild, "", "", "", false, "account-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sharedFirst.client != sharedSecond.client {
+		t.Fatal("disabling isolation did not restore the shared pool")
+	}
+}
+
+func TestAccountIsolationIdentitySurvivesEnableBoundary(t *testing.T) {
+	manager := NewManager(egressRepositoryTestStub{}, nil)
+	created := 0
+	manager.newBuildClient = func(string, time.Duration) (requestClient, error) {
+		created++
+		return &scriptedRequestClient{}, nil
+	}
+	firstIdentity := isolationAccountIdentity(WithAccountIdentity(context.Background(), "account-1"), domain.ScopeBuild, "1")
+	secondIdentity := isolationAccountIdentity(WithAccountIdentity(context.Background(), "account-2"), domain.ScopeBuild, "2")
+	manager.UpdateAccountIsolatedConnections(true)
+	first, err := manager.clientFor(0, domain.ScopeBuild, "", "", "", false, firstIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.clientFor(0, domain.ScopeBuild, "", "", "", false, secondIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 2 || first.client == second.client {
+		t.Fatalf("enable-boundary identities shared a pool: created=%d", created)
+	}
+}
+
+func TestBuildEnvironmentDirectKeepsFallbackWhenIsolationDisabled(t *testing.T) {
+	manager := NewManager(egressRepositoryTestStub{}, nil)
+	factoryCalls := 0
+	manager.newBuildEnvClient = func(time.Duration) (requestClient, error) {
+		factoryCalls++
+		return &scriptedRequestClient{}, nil
+	}
+
+	lease, configured, err := manager.AcquireBuildEnvironmentDirectIfIsolated(
+		WithAccountIdentity(context.Background(), "grok_build_1"), "1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured || lease != nil || factoryCalls != 0 {
+		t.Fatalf("disabled isolation created a manager direct pool: configured=%t lease=%v factoryCalls=%d", configured, lease, factoryCalls)
+	}
+}
+
+func TestCreateAndCacheClientRejectsStaleIsolationMode(t *testing.T) {
+	manager := NewManager(egressRepositoryTestStub{}, nil)
+	manager.UpdateAccountIsolatedConnections(true)
+	factoryCalls := 0
+	manager.newBuildClient = func(string, time.Duration) (requestClient, error) {
+		factoryCalls++
+		return &scriptedRequestClient{}, nil
+	}
+
+	// An empty identity represents a cache key derived before isolation was
+	// enabled. It must not be accepted after the mode transition, even when it
+	// reaches creation after the transition's generation bump.
+	_, err := manager.createAndCacheClient(
+		clientCacheKey{nodeID: 0, scope: domain.ScopeBuild, fingerprint: "stale-shared"},
+		0, domain.ScopeBuild, "", "", false, settingsdomain.DefaultBuildResponseHeaderTimeout, clientOptions{},
+	)
+	if !errors.Is(err, errClientCacheInvalidated) {
+		t.Fatalf("stale isolation mode error = %v", err)
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("stale cache key created %d clients", factoryCalls)
+	}
+}
+

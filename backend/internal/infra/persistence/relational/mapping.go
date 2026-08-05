@@ -119,7 +119,7 @@ func fromAccountDomain(value account.Credential) accountModel {
 	return accountModel{
 		ID: value.ID, IdentityKey: accountIdentity(value), Provider: string(value.Provider), Name: value.Name, Email: value.Email,
 		UserID: value.UserID, TeamID: value.TeamID, SourceKey: value.SourceKey,
-		Enabled: value.Enabled, AuthStatus: string(value.AuthStatus), Priority: value.Priority,
+		Enabled: value.Enabled, AuthStatus: string(value.AuthStatus), ReauthMarkedAt: value.ReauthMarkedAt, Priority: value.Priority,
 		MaxConcurrent: value.MaxConcurrent, MinimumRemaining: value.MinimumRemaining, FailureCount: value.FailureCount,
 		CooldownUntil: value.CooldownUntil, LastError: value.LastError, LastUsedAt: value.LastUsedAt,
 		ObservedModel: value.ObservedModel, ObservedModelAt: value.ObservedModelAt,
@@ -218,9 +218,14 @@ func toModelDomain(value modelRouteModel) model.Route {
 func toClientKeyDomain(value clientKeyModel, allowedModels []uint64) clientkey.Key {
 	providerScope, _ := clientkey.NormalizeProviderScope(clientkey.ProviderScope(value.ProviderScopeMask))
 	tierScope, _ := clientkey.NormalizeTierScope(clientkey.TierScope(value.TierScopeMask))
+	internalKind := ""
+	if value.InternalKind != nil {
+		internalKind = *value.InternalKind
+	}
 	return clientkey.Key{
 		ID: value.ID, Name: value.Name, Prefix: value.Prefix, SecretHash: value.SecretHash, EncryptedSecret: value.EncryptedSecret,
-		Enabled: value.Enabled, ExpiresAt: value.ExpiresAt, RPMLimit: value.RPMLimit, MaxConcurrent: value.MaxConcurrent,
+		InternalKind: internalKind,
+		Enabled:      value.Enabled, ExpiresAt: value.ExpiresAt, RPMLimit: value.RPMLimit, MaxConcurrent: value.MaxConcurrent,
 		BillingLimitUSDTicks: value.BillingLimitUSDTicks, BilledUsageUSDTicks: value.BilledUsageUSDTicks, ReservedUsageUSDTicks: value.ReservedUsageUSDTicks,
 		AllowModelAliases: value.AllowModelAliases, AllowedModels: allowedModels,
 		ProviderScope: providerScope, TierScope: tierScope,

@@ -20,13 +20,15 @@ type startupAccountRepository interface {
 }
 
 const (
-	startupRecoveryBudget     = 20 * time.Second
-	startupCriticalWindow     = 2 * time.Minute
-	startupCriticalLimit      = 100
-	statsigWarmupInterval     = 15 * time.Minute
-	statsigWarmupAccountLimit = 3
-	modelCatalogStaleAfter    = 24 * time.Hour
-	modelCatalogCatchupEvery  = 6 * time.Hour
+	startupRecoveryBudget      = 20 * time.Second
+	startupCriticalWindow      = 2 * time.Minute
+	startupCriticalLimit       = 100
+	statsigWarmupInterval      = 15 * time.Minute
+	statsigWarmupAccountLimit  = 3
+	consoleUsageMigrationEvery = 24 * time.Hour
+	consoleUsageMigrationRetry = 5 * time.Minute
+	modelCatalogStaleAfter     = 24 * time.Hour
+	modelCatalogCatchupEvery   = 6 * time.Hour
 )
 
 type startupReport struct {
@@ -347,6 +349,30 @@ func warmStatsigFromAccounts(ctx context.Context, values []accountdomain.Credent
 		}
 	}
 	return 0, lastErr
+}
+
+func (a *Application) runConsoleUsageMigration(ctx context.Context) {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		succeeded, failed, err := a.accounts.SyncIncompleteConsoleQuotas(ctx)
+		nextRun := consoleUsageMigrationEvery
+		if err != nil && ctx.Err() == nil {
+			a.logger.Warn("console_usage_migration_failed", "succeeded", succeeded, "failed", failed, "error", err)
+			nextRun = consoleUsageMigrationRetry
+		} else if failed > 0 {
+			a.logger.Warn("console_usage_migration_incomplete", "succeeded", succeeded, "failed", failed)
+			nextRun = consoleUsageMigrationRetry
+		} else if succeeded > 0 {
+			a.logger.Info("console_usage_migration_completed", "succeeded", succeeded, "failed", failed)
+		}
+		resetTimer(timer, nextRun)
+	}
 }
 
 func (a *Application) runModelCatalogCatchup(ctx context.Context) {

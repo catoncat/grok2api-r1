@@ -173,7 +173,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
       ...form,
       scope,
       userAgent: scope === "grok_build" ? "" : (form.userAgent === "" || form.userAgent === previousDefault ? nextDefault : form.userAgent),
-      cloudflareCookies: scope === "grok_build" ? "" : form.cloudflareCookies,
+      cloudflareCookies: scope === "grok_build" || scope === "grok_console_asset" ? "" : form.cloudflareCookies,
     });
   }
 
@@ -181,6 +181,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
     if (scope === "grok_build") return t("settings.egress.scopeBuild");
     if (scope === "grok_console") return t("console.name");
     if (scope === "grok_web_asset") return t("settings.egress.scopeWebAsset");
+    if (scope === "grok_console_asset") return t("settings.egress.scopeConsoleAsset");
     return t("settings.egress.scopeWeb");
   }
 
@@ -240,6 +241,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
                     { value: "grok_web", label: scopeLabel("grok_web") },
                     { value: "grok_console", label: scopeLabel("grok_console") },
                     { value: "grok_web_asset", label: scopeLabel("grok_web_asset") },
+                    { value: "grok_console_asset", label: scopeLabel("grok_console_asset") },
                   ] },
                   { id: "enabled", label: t("settings.egress.enabled"), value: enabledFilter, onChange: (value) => { setEnabledFilter(value); setPage(1); setSelected(new Map()); }, options: [
                     { value: "enabled", label: t("common.enable") },
@@ -396,10 +398,11 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
                   <SelectItem value="grok_web">{t("settings.egress.scopeWeb")}</SelectItem>
                   <SelectItem value="grok_console">{t("console.name")}</SelectItem>
                   <SelectItem value="grok_web_asset">{t("settings.egress.scopeWebAsset")}</SelectItem>
+                  <SelectItem value="grok_console_asset">{t("settings.egress.scopeConsoleAsset")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
-            {form.scope !== "grok_build" ? (
+            {form.scope !== "grok_build" && form.scope !== "grok_console_asset" ? (
               <div className="flex h-10 items-center justify-between gap-4 rounded-md bg-muted/45 px-3">
                 <span className="text-xs font-medium">{t("settings.egress.clearance")}</span>
                 <Badge variant="secondary" className="shrink-0 text-[10px]">
@@ -452,6 +455,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
                     <SelectItem value="grok_web">{t("settings.egress.scopeWeb")}</SelectItem>
                     <SelectItem value="grok_console">{t("console.name")}</SelectItem>
                     <SelectItem value="grok_web_asset">{t("settings.egress.scopeWebAsset")}</SelectItem>
+                    <SelectItem value="grok_console_asset">{t("settings.egress.scopeConsoleAsset")}</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>

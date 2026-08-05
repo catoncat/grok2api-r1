@@ -103,41 +103,24 @@ function BuildQuota({ quota, billing, locale }: { quota: QuotaDTO; billing?: Bil
 
 const visibleWebQuotaModes = ["auto", "fast", "expert", "heavy"] as const;
 
-const consoleQuotaModes = [
-  { mode: "console:grok-4.3", label: "Grok 4.3" },
-  { mode: "console:grok-4.20-0309-reasoning", label: "4.20 R" },
-  { mode: "console:grok-4.20-0309-non-reasoning", label: "4.20 NR" },
-  { mode: "console:grok-4.20-multi-agent-0309", label: "4.20 MA" },
-  { mode: "console:grok-build-0.1", label: "Build 0.1" },
-] as const;
-
 export function ConsoleQuota({ windows, locale }: { windows: NonNullable<AccountDTO["quotaWindows"]>; locale: string }) {
   const { t } = useTranslation();
-  const modelWindows = new Map<string, WebQuotaWindow>();
-  for (const window of windows) {
-    if (!window.mode.startsWith("console:")) continue;
-    const mode = window.mode === "console:grok-4.20-0309" ? "console:grok-4.20-0309-reasoning" : window.mode;
-    if (!modelWindows.has(mode) || window.mode === mode) modelWindows.set(mode, window);
-  }
-  if (modelWindows.size === 0) {
-    const legacy = windows.find((window) => window.mode === "console");
-    if (!legacy) return <span className="text-xs text-muted-foreground">{t("accounts.quotaNotSynced")}</span>;
-    return <WebQuotaMode mode="Console" window={legacy} locale={locale} />;
-  }
-  const knownModes = new Set<string>(consoleQuotaModes.map(({ mode }) => mode));
-  const visible = [
-    ...consoleQuotaModes.flatMap(({ mode, label }) => {
-      const window = modelWindows.get(mode);
-      return window ? [{ mode, label, window }] : [];
-    }),
-    ...[...modelWindows.entries()]
-      .filter(([mode]) => !knownModes.has(mode))
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([mode, window]) => ({ mode, label: mode.slice("console:".length), window })),
-  ];
+  if (windows.length === 0) return <span className="text-xs text-muted-foreground">{t("accounts.quotaNotSynced")}</span>;
+  const windowsByMode = new Map(windows.map((window) => [window.mode, window]));
+  const modes = [
+    { mode: "console", label: t("creativeConsole.modes.chat") },
+    { mode: "console_image", label: t("creativeConsole.modes.image") },
+    { mode: "console_video", label: t("creativeConsole.modes.video") },
+  ] as const;
   return (
-    <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-1.5 2xl:grid-cols-3">
-      {visible.map(({ mode, label, window }) => <WebQuotaMode key={mode} mode={mode.slice("console:".length)} label={label} window={window} locale={locale} />)}
+    <div className="grid w-full min-w-0 grid-cols-3 divide-x divide-border/70">
+      {modes.map(({ mode, label }) => {
+        const window = windowsByMode.get(mode);
+        if (!window) {
+          return <div key={mode} className="min-w-0 px-2 first:pl-0 last:pr-0"><div className="flex items-center justify-between gap-1 text-[11px]"><span className="truncate text-muted-foreground">{label}</span><span className="text-muted-foreground">-</span></div><div className="mt-1.5 h-1.5 rounded-full bg-muted" /></div>;
+        }
+        return <WebQuotaMode key={mode} mode={label} window={window} locale={locale} compact recoveryProbe={mode === "console" && window.remaining === 0} />;
+      })}
     </div>
   );
 }
@@ -189,7 +172,7 @@ function WeeklyWebQuota({ window, locale, t }: { window: WebQuotaWindow; locale:
   );
 }
 
-function WebQuotaMode({ mode, label = mode, window, locale, compact = false }: { mode: string; label?: string; window: WebQuotaWindow; locale: string; compact?: boolean }) {
+function WebQuotaMode({ mode, window, locale, compact = false, recoveryProbe = false }: { mode: string; window: WebQuotaWindow; locale: string; compact?: boolean; recoveryProbe?: boolean }) {
   const { t } = useTranslation();
   const used = Math.max(0, window.total - window.remaining);
   const percent = window.total > 0 ? Math.max(0, Math.min(100, used / window.total * 100)) : 0;
@@ -197,11 +180,11 @@ function WebQuotaMode({ mode, label = mode, window, locale, compact = false }: {
     <Tooltip>
       <TooltipTrigger asChild>
         <button type="button" className={cn("block w-full min-w-0 text-left", compact && "px-2 first:pl-0 last:pr-0")}>
-          <div className="flex items-center justify-between gap-1 text-[11px]"><span className="truncate text-muted-foreground" title={mode}>{label}</span><span className="shrink-0 tabular-nums">{formatNumber(used, locale, 0)}/{formatNumber(window.total, locale, 0)}</span></div>
+          <div className="flex items-center justify-between gap-1 text-[11px]"><span className="truncate text-muted-foreground">{mode}</span><span className="shrink-0 tabular-nums">{formatNumber(used, locale, 0)}/{formatNumber(window.total, locale, 0)}</span></div>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${percent}%` }} /></div>
         </button>
       </TooltipTrigger>
-      <TooltipContent><div>{t("accounts.webModeQuotaRemaining", { mode, remaining: formatNumber(window.remaining, locale, 0) })}</div><div className="text-muted-foreground">{window.resetAt ? t("accounts.quotaResetAt", { time: formatDateTime(window.resetAt, locale) }) : t("accounts.quotaResetUnknown")}</div></TooltipContent>
+      <TooltipContent><div>{t("accounts.webModeQuotaRemaining", { mode, remaining: formatNumber(window.remaining, locale, 0) })}</div><div className="text-muted-foreground">{window.resetAt ? recoveryProbe ? t("console.recoveryProbeAt", { time: formatDateTime(window.resetAt, locale) }) : t("accounts.quotaResetAt", { time: formatDateTime(window.resetAt, locale) }) : t("accounts.quotaResetUnknown")}</div></TooltipContent>
     </Tooltip>
   );
 }
