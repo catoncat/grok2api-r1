@@ -8,6 +8,7 @@ import (
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
+	settingsdomain "github.com/chenyme/grok2api/backend/internal/domain/settings"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
@@ -15,16 +16,17 @@ import (
 )
 
 type Config struct {
-	BaseURL             string
-	StatsigMode         string
-	StatsigManualValue  string
-	StatsigSignerURL    string
-	QuotaTimeoutSeconds int
-	ChatTimeoutSeconds  int
-	ImageTimeoutSeconds int
-	VideoTimeoutSeconds int
-	MaxInputImageBytes  int64
-	AllowNSFW           bool
+	BaseURL                  string
+	StatsigMode              string
+	StatsigManualValue       string
+	StatsigSignerURL         string
+	QuotaTimeoutSeconds      int
+	ChatTimeoutSeconds       int
+	StreamIdleTimeoutSeconds int
+	ImageTimeoutSeconds      int
+	VideoTimeoutSeconds      int
+	MaxInputImageBytes       int64
+	AllowNSFW                bool
 }
 
 type Adapter struct {
@@ -73,6 +75,9 @@ func normalizedConfig(cfg Config) Config {
 	}
 	if cfg.ChatTimeoutSeconds <= 0 {
 		cfg.ChatTimeoutSeconds = 120
+	}
+	if cfg.StreamIdleTimeoutSeconds <= 0 {
+		cfg.StreamIdleTimeoutSeconds = int(settingsdomain.DefaultWebStreamIdleTimeout.Seconds())
 	}
 	if cfg.ImageTimeoutSeconds <= 0 {
 		cfg.ImageTimeoutSeconds = 180
@@ -132,6 +137,11 @@ func (a *Adapter) PricingModel(upstreamModel string) string {
 	if ok {
 		if spec.Capability == modeldomain.CapabilityChat {
 			return "grok-4.5"
+		}
+		// Public Web image names carry the -lite suffix to distinguish them from
+		// Console routes. Billing continues to use the upstream xAI model name.
+		if spec.Capability == modeldomain.CapabilityImage {
+			return spec.UpstreamModel
 		}
 		return spec.PublicID
 	}

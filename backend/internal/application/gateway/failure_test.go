@@ -9,6 +9,7 @@ import (
 
 	accountdomain "github.com/chenyme/grok2api/backend/internal/domain/account"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
+	"github.com/chenyme/grok2api/backend/internal/pkg/neterror"
 )
 
 type responseHeaderTimeoutTestError struct{}
@@ -16,8 +17,19 @@ type responseHeaderTimeoutTestError struct{}
 func (responseHeaderTimeoutTestError) Error() string {
 	return "http2: timeout awaiting response headers"
 }
+
 func (responseHeaderTimeoutTestError) Timeout() bool   { return true }
 func (responseHeaderTimeoutTestError) Temporary() bool { return true }
+
+func TestTransportUpstreamFailureClassifiesProviderStreamIdleTimeout(t *testing.T) {
+	failure := newTransportUpstreamFailure(neterror.ErrUpstreamStreamIdleTimeout, 42, "web")
+	if failure.HTTPStatus != http.StatusGatewayTimeout || failure.Code != "upstream_stream_idle_timeout" || failure.AccountScoped {
+		t.Fatalf("failure = %#v", failure)
+	}
+	if !isRetryableTransportFailure(accountdomain.ProviderWeb, neterror.ErrUpstreamStreamIdleTimeout) {
+		t.Fatal("pre-response Web idle timeout should retain bounded cross-account failover")
+	}
+}
 
 func TestTransportUpstreamFailureClassifiesResponseHeaderTimeout(t *testing.T) {
 	failure := newTransportUpstreamFailure(responseHeaderTimeoutTestError{}, 42, "build")
@@ -168,6 +180,16 @@ func TestHTTPUpstreamFailureClassifiesBuildForbiddenBodies(t *testing.T) {
 	}
 }
 
+func TestHTTPUpstreamFailureClassifiesDPoPRequirementAsSystemic(t *testing.T) {
+	failure := newHTTPUpstreamFailure(http.StatusForbidden, []byte(`{"code":"unauthorized:dpop-required","error":"DPoP proof required but was not verified."}`), 42, "console")
+	if failure.AccountScoped || failure.CredentialRejected || !failure.RequestScopedForbidden {
+		t.Fatalf("failure = %#v", failure)
+	}
+	if failure.UpstreamCode != "unauthorized:dpop-required" || failure.Fingerprint != "403:unauthorized_dpop_required" {
+		t.Fatalf("failure metadata = %#v", failure)
+	}
+}
+
 func TestNonAccountFailureFingerprintStopsAtLimit(t *testing.T) {
 	fingerprints := map[string]int{}
 	for _, status := range []int{
@@ -213,6 +235,21 @@ func TestNonAccountFailureFingerprintStopsAtLimit(t *testing.T) {
 	}
 	if fingerprints["upstream_timeout"] != nonAccountFailureFingerprintLimit {
 		t.Fatalf("fingerprint count = %d, want %d", fingerprints["upstream_timeout"], nonAccountFailureFingerprintLimit)
+	}
+
+	idleFingerprints := map[string]int{}
+	idle := &UpstreamFailure{
+		HTTPStatus: http.StatusGatewayTimeout, Code: "upstream_stream_idle_timeout",
+		Fingerprint: "upstream_stream_idle_timeout",
+	}
+	if shouldStopForNonAccountFingerprint(idleFingerprints, idle) {
+		t.Fatal("the first stream idle failure should allow one compensating account switch")
+	}
+	if !shouldStopForNonAccountFingerprint(idleFingerprints, idle) {
+		t.Fatalf("stream idle failures should stop after %d attempts", streamIdleFailureFingerprintLimit)
+	}
+	if idleFingerprints[idle.Fingerprint] != streamIdleFailureFingerprintLimit {
+		t.Fatalf("idle fingerprint count = %d", idleFingerprints[idle.Fingerprint])
 	}
 }
 
@@ -354,6 +391,14 @@ func TestTerminalRequestForbiddenRequiresExplicitRequestSignal(t *testing.T) {
 		if isTerminalRequestForbidden(providerValue, requestScoped) {
 			t.Fatalf("%s request classification must retain existing egress recovery", providerValue)
 		}
+	}
+
+	dpopRequired := &UpstreamFailure{HTTPStatus: http.StatusForbidden, UpstreamCode: "unauthorized:dpop-required", RequestScopedForbidden: true}
+	if !isTerminalRequestForbidden(accountdomain.ProviderConsole, dpopRequired) {
+		t.Fatal("Console DPoP auth-scheme requirement must be terminal")
+	}
+	if isTerminalRequestForbidden(accountdomain.ProviderWeb, dpopRequired) {
+		t.Fatal("Console-specific DPoP classification must not change Web recovery")
 	}
 
 	safety := &UpstreamFailure{HTTPStatus: http.StatusForbidden, UpstreamCode: "permission-denied", SafetyRejection: true}

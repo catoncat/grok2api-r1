@@ -19,13 +19,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
-	domainegress "github.com/chenyme/grok2api/backend/internal/domain/egress"
 	inferencedomain "github.com/chenyme/grok2api/backend/internal/domain/inference"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/conversation"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/searchresult"
-	"github.com/chenyme/grok2api/backend/internal/repository"
 )
 
 const webResponseTTL = 30 * 24 * time.Hour
@@ -154,7 +152,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	spec, ok := Resolve(request.Model)
 	if ok && spec.ProtocolModel == "imagine-lite" && request.Operation == "chat" {
 		if len(tools.ResponseTools) > 0 {
-			return invalidImageRequest("grok-imagine-image 不支持 tools")
+			return invalidImageRequest("grok-imagine-image-lite 不支持 tools")
 		}
 		return a.forwardLiteChatCompletion(ctx, request, input, normalized, spec)
 	}
@@ -174,7 +172,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		if attempt > 0 {
 			attemptCtx = infraegress.WithPhysicalCallStage(ctx, "anti_bot_retry")
 		}
-		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(attemptCtx, request.Credential, input.PreviousResponseID, spec, normalized, attempt > 0, excludedNodeID)
+		upstream, lease, currentPrevious, statsigTarget, openErr := a.openChat(attemptCtx, request.Credential, input.PreviousResponseID, spec, normalized, true, excludedNodeID)
 		if openErr != nil {
 			// Grok /index 403 是节点级 anti-bot 信号：只对当前 lease 反馈，
 			// 最多换一次不同 Egress（receipt r1.5/r1.6）。
@@ -237,7 +235,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 					}, nil
 				}
 				lease.InvalidateClearance()
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
+				if statsigTarget != "" && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 					lease.Release()
 					continue
 				}
@@ -270,7 +268,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 				a.releaseStatsigRetry(upstream, lease)
 				continue
 			}
-			if errors.Is(preflightErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
+			if statsigTarget != "" && errors.Is(preflightErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 				a.releaseStatsigRetry(upstream, lease)
 				continue
 			}
@@ -289,7 +287,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 			lease.Release()
 			continue
 		}
-		if errors.Is(consumeErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
+		if statsigTarget != "" && errors.Is(consumeErr, errWebAntiBot) && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, statsigTarget, statsigGenerationFromResponse(upstream)) {
 			lease.Release()
 			continue
 		}
@@ -334,14 +332,19 @@ func (a *Adapter) releaseStatsigRetry(upstream *http.Response, lease *infraegres
 }
 
 func (a *Adapter) feedbackAntiBot(ctx context.Context, lease *infraegress.Lease, statsigTarget string, generations ...uint64) {
-	a.invalidateSignedStatsig(http.MethodPost, statsigTarget, generations...)
+	if statsigTarget != "" {
+		a.invalidateSignedStatsig(http.MethodPost, statsigTarget, generations...)
+	}
+	// r1: FeedbackForLease 走 confirm-before-poison，避免单次 403 立刻毒化节点。
 	a.egress.FeedbackForLease(context.WithoutCancel(ctx), lease, http.StatusForbidden, nil)
 }
 
 // retryAfterCode7 只失效签名（按代次），不反馈 Egress：code 7 是账号/签名
-// 拒绝，不是共享浏览器出口不健康的证据。
+// 拒绝，不是共享浏览器出口不健康的证据。Gateway 路径 statsigTarget 为空时直接放行一次重试预算。
 func (a *Adapter) retryAfterCode7(target string, generations ...uint64) bool {
-	a.invalidateSignedStatsig(http.MethodPost, target, generations...)
+	if target != "" {
+		a.invalidateSignedStatsig(http.MethodPost, target, generations...)
+	}
 	return true
 }
 
@@ -362,6 +365,12 @@ func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 					if errorValue, ok := root["error"].(map[string]any); ok {
 						return nil, webResponseError(errorValue)
 					}
+					if event, ok := root["event"].(map[string]any); ok {
+						if event["type"] == "error" {
+							return nil, gatewayEventError(event)
+						}
+						return &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefetched.Bytes()), reader), closer: source}, nil
+					}
 					if result, ok := root["result"].(map[string]any); ok && (result["conversation"] != nil || result["response"] != nil) {
 						return &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefetched.Bytes()), reader), closer: source}, nil
 					}
@@ -378,66 +387,8 @@ func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("Grok Web 首个流事件超过安全检查上限")
 }
 
-func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput, forceRemote bool, excludedNodeID uint64) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
-	cfg := a.config()
-	token, err := a.cipher.Decrypt(credential.EncryptedAccessToken)
-	if err != nil {
-		return nil, nil, nil, "", err
-	}
-	lease, err := a.egress.AcquireCredentialExcluding(ctx, domainegress.ScopeWeb, credential, excludedNodeID)
-	if err != nil {
-		return nil, nil, nil, "", err
-	}
-	mode := spec.Mode
-	endpoint := cfg.BaseURL + "/rest/app-chat/conversations/new"
-	var previous *inferencedomain.WebResponseState
-	if previousResponseID != "" {
-		state, stateErr := a.states.GetWebState(ctx, previousResponseID, time.Now().UTC())
-		if stateErr != nil {
-			lease.Release()
-			if errors.Is(stateErr, repository.ErrNotFound) {
-				return nil, nil, nil, "", fmt.Errorf("previous_response_id 不存在或已过期")
-			}
-			return nil, nil, nil, "", stateErr
-		}
-		if state.AccountID != credential.ID {
-			lease.Release()
-			return nil, nil, nil, "", fmt.Errorf("previous_response_id 绑定的账号不一致")
-		}
-		previous = &state
-		endpoint = cfg.BaseURL + "/rest/app-chat/conversations/" + url.PathEscape(state.ConversationID) + "/responses"
-	}
-	attachments, err := a.prepareChatAttachments(ctx, cfg, lease, token, input.Attachments)
-	if err != nil {
-		lease.Release()
-		return nil, nil, nil, "", err
-	}
-	payload := buildWebChatPayload(input.Prompt, mode, attachments)
-	if previous != nil {
-		payload["responseId"] = previous.UpstreamParentResponseID
-	}
-	data, _ := json.Marshal(payload)
-	requestCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.ChatTimeoutSeconds)*time.Second)
-	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(data))
-	if err != nil {
-		cancel()
-		lease.Release()
-		return nil, nil, nil, "", err
-	}
-	request.Header = buildSignedHeaders(token, lease, "application/json")
-	if err := a.applySignedStatsig(requestCtx, request, token, lease, forceRemote); err != nil {
-		cancel()
-		return nil, lease, nil, endpoint, err
-	}
-	response, err := lease.Do(request)
-	if err != nil {
-		cancel()
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
-		lease.Release()
-		return nil, nil, nil, "", err
-	}
-	response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
-	return response, lease, previous, endpoint, nil
+func (a *Adapter) openChat(ctx context.Context, credential account.Credential, previousResponseID string, spec ModelSpec, input normalizedChatInput, enforceStreamIdle bool, excludedNodeID uint64) (*http.Response, *infraegress.Lease, *inferencedomain.WebResponseState, string, error) {
+	return a.openGatewayChat(ctx, credential, previousResponseID, spec, input, enforceStreamIdle, excludedNodeID)
 }
 
 func (a *Adapter) handleResponseResource(ctx context.Context, request provider.ResponseResourceRequest) (*provider.Response, error) {
@@ -802,23 +753,6 @@ func extractImageURL(part map[string]any) string {
 	return ""
 }
 
-func buildWebChatPayload(message, mode string, attachments []string) map[string]any {
-	if attachments == nil {
-		attachments = []string{}
-	}
-	return map[string]any{
-		"collectionIds": []any{}, "disabledConnectorIds": []any{},
-		"deviceEnvInfo": map[string]any{"darkModeEnabled": false, "devicePixelRatio": 2, "screenHeight": 1328, "screenWidth": 2056, "viewportHeight": 1083, "viewportWidth": 2056},
-		"disableMemory": true, "disableSearch": false, "disableSelfHarmShortCircuit": false,
-		"disableTextFollowUps": false, "enableImageGeneration": true, "enableImageStreaming": true,
-		"enableSideBySide": true, "fileAttachments": attachments, "forceConcise": false,
-		"forceSideBySide": false, "imageAttachments": []any{}, "imageGenerationCount": 2,
-		"isAsyncChat": false, "message": message, "modeId": mode, "responseMetadata": map[string]any{},
-		"returnImageBytes": false, "returnRawGrokInXaiRequest": false,
-		"sendFinalMetadata": true, "temporary": true,
-	}
-}
-
 func consumeUpstream(source io.Reader, emit func(string, string) error) (parsedChat, error) {
 	parsed := parsedChat{}
 	err := consumeUpstreamInto(source, &parsed, emit)
@@ -900,6 +834,9 @@ func parseUpstreamFrame(data []byte, parsed *parsedChat) (string, string, error)
 	var root map[string]any
 	if json.Unmarshal(data, &root) != nil {
 		return "", "", nil
+	}
+	if event, ok := root["event"].(map[string]any); ok {
+		return parseGatewayEvent(event, parsed)
 	}
 	if errorValue, ok := root["error"].(map[string]any); ok {
 		return "", "", webResponseError(errorValue)

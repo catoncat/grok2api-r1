@@ -15,17 +15,20 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	egressdomain "github.com/chenyme/grok2api/backend/internal/domain/egress"
 	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
+	settingsdomain "github.com/chenyme/grok2api/backend/internal/domain/settings"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/conversation"
+	providerstreamidle "github.com/chenyme/grok2api/backend/internal/infra/provider/streamidle"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 )
 
 type Config struct {
-	BaseURL        string
-	SessionBaseURL string
-	UserAgent      string
-	TimeoutSeconds int
+	BaseURL                  string
+	SessionBaseURL           string
+	UserAgent                string
+	TimeoutSeconds           int
+	StreamIdleTimeoutSeconds int
 }
 
 type Adapter struct {
@@ -38,12 +41,21 @@ type Adapter struct {
 }
 
 func NewAdapter(cfg Config, egress *infraegress.Manager, cipher *security.Cipher, assets provider.ImageAssetStore) *Adapter {
+	cfg = normalizedConfig(cfg)
 	return &Adapter{cfg: cfg, egress: egress, cipher: cipher, assets: assets, dpop: newDPoPSessionManager()}
+}
+
+func normalizedConfig(cfg Config) Config {
+	if cfg.StreamIdleTimeoutSeconds <= 0 {
+		cfg.StreamIdleTimeoutSeconds = int(settingsdomain.DefaultConsoleStreamIdleTimeout.Seconds())
+	}
+	return cfg
 }
 
 func (a *Adapter) Provider() account.Provider { return account.ProviderConsole }
 
 func (a *Adapter) UpdateConfig(cfg Config) {
+	cfg = normalizedConfig(cfg)
 	a.mu.Lock()
 	a.cfg = cfg
 	a.mu.Unlock()
@@ -115,7 +127,17 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 	}
 	cfg := a.config()
-	requestCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
+	requestCtx, totalCancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
+	var idleCancel context.CancelCauseFunc
+	if request.Streaming && cfg.StreamIdleTimeoutSeconds > 0 {
+		requestCtx, idleCancel = context.WithCancelCause(requestCtx)
+	}
+	cancel := func() {
+		if idleCancel != nil {
+			idleCancel(nil)
+		}
+		totalCancel()
+	}
 	lease, err := a.egress.AcquireCredential(requestCtx, egressdomain.ScopeConsole, request.Credential)
 	if err != nil {
 		cancel()
@@ -127,6 +149,9 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		lease.Release()
 		cancel()
 		return nil, err
+	}
+	if request.Streaming && idleCancel != nil && response.StatusCode >= 200 && response.StatusCode < 300 && response.Body != nil {
+		response.Body = providerstreamidle.New(response.Body, time.Duration(cfg.StreamIdleTimeoutSeconds)*time.Second, idleCancel)
 	}
 	responseBodyTruncated := false
 	var rateLimit *provider.RateLimitMetadata
@@ -148,7 +173,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 			cancel()
 			return nil, readErr
 		}
-		if !provider.IsDefinitiveAccountBlockBody(data) {
+		if shouldInvalidateConsoleClearance(data) {
 			lease.InvalidateClearance()
 			a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
 		}
@@ -220,6 +245,12 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	result := responseResult(response, &releaseBody{ReadCloser: response.Body, release: release})
 	result.RateLimit = rateLimit
 	return result, nil
+}
+
+// shouldInvalidateConsoleClearance keeps account-level and protocol-level
+// rejections from being misclassified as a broken browser/egress binding.
+func shouldInvalidateConsoleClearance(body []byte) bool {
+	return !provider.IsDefinitiveAccountBlockBody(body) && !provider.IsDPoPProofRequiredBody(body)
 }
 
 func normalizeConversationError(data []byte, operation string, status int) []byte {

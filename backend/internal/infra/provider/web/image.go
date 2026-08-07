@@ -317,7 +317,7 @@ func (a *Adapter) GenerateImage(ctx context.Context, request provider.ImageGener
 	}
 	if protocolModel == "imagine-lite" {
 		if request.Streaming {
-			return invalidImageRequest("grok-imagine-image 不支持 stream")
+			return invalidImageRequest("grok-imagine-image-lite 不支持 stream")
 		}
 		if count > maxGeneratedImages {
 			return invalidImageRequest("n 不能超过 10")
@@ -388,7 +388,7 @@ func (e *liteUpstreamError) Response() *provider.Response {
 
 func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.Credential, spec ModelSpec, prompt string) (string, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt}, attempt > 0, 0)
+		upstream, lease, _, statsigTarget, err := a.openChat(ctx, credential, "", spec, normalizedChatInput{Prompt: "Drawing: " + prompt}, false, 0)
 		if err != nil {
 			if lease != nil {
 				lease.Release()
@@ -502,7 +502,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 
 func (a *Adapter) forwardLiteChatCompletion(ctx context.Context, request provider.ResponseResourceRequest, input openAIRequest, normalized normalizedChatInput, spec ModelSpec) (*provider.Response, error) {
 	if len(normalized.Attachments) > 0 {
-		return invalidImageRequest("grok-imagine-image 只支持纯文本生图；附件请使用对应的图片编辑或对话模型")
+		return invalidImageRequest("grok-imagine-image-lite 只支持纯文本生图；附件请使用对应的图片编辑或对话模型")
 	}
 	count := 1
 	format := "url"
@@ -1262,7 +1262,9 @@ func browserMultipartFilename(value string) string {
 
 func decodeDirectFileUploadResponse(source io.Reader) (uploadedFile, error) {
 	var value struct {
-		FileMetadata struct {
+		UploadID      string          `json:"uploadId"`
+		TerminalError json.RawMessage `json:"terminalError"`
+		FileMetadata  struct {
 			ID      string `json:"fileMetadataId"`
 			FileID  string `json:"fileId"`
 			FileURI string `json:"fileUri"`
@@ -1271,8 +1273,17 @@ func decodeDirectFileUploadResponse(source io.Reader) (uploadedFile, error) {
 	if err := json.NewDecoder(source).Decode(&value); err != nil {
 		return uploadedFile{}, fmt.Errorf("V2 上传文件响应无效: %w", err)
 	}
+	if directFileUploadTerminalError(value.TerminalError) {
+		return uploadedFile{}, errors.New("V2 上传文件被上游拒绝")
+	}
 	if value.FileMetadata.ID == "" {
 		value.FileMetadata.ID = value.FileMetadata.FileID
+	}
+	if value.FileMetadata.ID == "" {
+		// Some successful uploads complete asynchronously and only expose the
+		// upload task ID. Gateway accepts it as the file reference; prefer the
+		// browser's fileMetadataId whenever it is already available.
+		value.FileMetadata.ID = strings.TrimSpace(value.UploadID)
 	}
 	fileURI := ""
 	if value.FileMetadata.FileURI != "" {
@@ -1282,6 +1293,31 @@ func decodeDirectFileUploadResponse(source io.Reader) (uploadedFile, error) {
 		return uploadedFile{}, fmt.Errorf("V2 上传文件成功但上游未返回完整文件标识")
 	}
 	return uploadedFile{ID: value.FileMetadata.ID, URI: fileURI}, nil
+}
+
+func directFileUploadTerminalError(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("false")) || bytes.Equal(trimmed, []byte("0")) {
+		return false
+	}
+	var value any
+	if json.Unmarshal(trimmed, &value) != nil {
+		return true
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case map[string]any:
+		return len(typed) != 0
+	case []any:
+		return len(typed) != 0
+	case bool:
+		return typed
+	case float64:
+		return typed != 0
+	default:
+		return value != nil
+	}
 }
 
 func (a *Adapter) createMediaPost(ctx context.Context, cfg Config, lease *egress.Lease, token, mediaType, mediaURL, prompt, stage string) (string, error) {
