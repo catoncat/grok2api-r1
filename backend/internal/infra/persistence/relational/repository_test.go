@@ -170,7 +170,7 @@ func TestHasActiveFiltersUnavailableCredentials(t *testing.T) {
 	if active, err := repo.HasActive(ctx, account.ProviderBuild, "", ""); err != nil || active {
 		t.Fatalf("expired Build active=%v err=%v", active, err)
 	}
-	if _, err := repo.UpdateTokens(ctx, build.ID, testEncryptedToken, "refresh", now.Add(time.Hour)); err != nil {
+	if _, err := repo.UpdateTokens(ctx, build.ID, testEncryptedToken, "refresh", now.Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.SaveBilling(ctx, account.Billing{AccountID: build.ID, MonthlyLimit: 10, Used: 10, SyncedAt: now}); err != nil {
